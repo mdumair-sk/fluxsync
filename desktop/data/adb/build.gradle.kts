@@ -1,0 +1,13 @@
+plugins {
+    alias(libs.plugins.kotlin.jvm)
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+dependencies {
+    implementation(libs.kotlinx.coroutines.core)
+    // No external deps for ADB — uses plain socket to port 5037
+}
