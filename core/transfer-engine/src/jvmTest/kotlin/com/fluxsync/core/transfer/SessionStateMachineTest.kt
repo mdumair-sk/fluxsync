@@ -3,6 +3,7 @@ package com.fluxsync.core.transfer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -83,5 +84,73 @@ class SessionStateMachineTest {
         runCurrent()
 
         assertEquals(1, cancelCount)
+    }
+
+    @Test
+    fun completionAndCancellationPersistTransferHistory() = runTest {
+        val repository = InMemoryTransferHistoryRepository()
+        val manager = TransferHistoryManager(repository = repository, nowMs = { 1_700_000_000_000L })
+
+        val snapshot = TransferHistorySessionSnapshot(
+            sessionId = 99L,
+            direction = TransferDirection.SENT,
+            peerDeviceName = "Receiver",
+            peerCertFingerprint = "AA:BB",
+            files = listOf(HistoryFileEntry(name = "demo.bin", sizeBytes = 42L, outcome = TransferOutcome.COMPLETED)),
+            totalSizeBytes = 42L,
+            startedAtMs = 1_699_999_999_000L,
+            averageSpeedBytesPerSec = 2048L,
+            channelsUsed = emptyList(),
+            failedFileCount = 0,
+        )
+
+        val completeMachine = SessionStateMachine(
+            sessionId = 99L,
+            scope = this,
+            onCancel = {},
+            onComplete = {},
+            transferHistoryManager = manager,
+            transferHistorySnapshotProvider = { snapshot },
+        )
+
+        completeMachine.complete()
+
+        val completedEntry = assertNotNull(repository.getById(repository.getAll().single().id))
+        assertEquals(TransferOutcome.COMPLETED, completedEntry.outcome)
+
+        val cancelMachine = SessionStateMachine(
+            sessionId = 100L,
+            scope = this,
+            onCancel = {},
+            onComplete = {},
+            transferHistoryManager = manager,
+            transferHistorySnapshotProvider = { snapshot.copy(sessionId = 100L) },
+        )
+
+        cancelMachine.cancel("test cancel")
+
+        val all = repository.getAll()
+        assertEquals(2, all.size)
+        assertEquals(TransferOutcome.CANCELLED, all.last().outcome)
+    }
+
+    private class InMemoryTransferHistoryRepository : TransferHistoryRepository {
+        private val entries = mutableListOf<TransferHistoryEntry>()
+
+        override suspend fun insert(entry: TransferHistoryEntry) {
+            entries += entry
+        }
+
+        override suspend fun getAll(): List<TransferHistoryEntry> = entries.toList()
+
+        override suspend fun getFiltered(direction: TransferDirection): List<TransferHistoryEntry> {
+            return entries.filter { it.direction == direction }
+        }
+
+        override suspend fun delete(id: String) {
+            entries.removeAll { it.id == id }
+        }
+
+        override suspend fun getById(id: String): TransferHistoryEntry? = entries.firstOrNull { it.id == id }
     }
 }

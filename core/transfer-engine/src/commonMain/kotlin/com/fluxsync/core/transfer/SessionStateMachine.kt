@@ -29,6 +29,8 @@ class SessionStateMachine(
     private val scope: CoroutineScope,
     private val onCancel: suspend (reason: String) -> Unit,
     private val onComplete: suspend () -> Unit,
+    private val transferHistoryManager: TransferHistoryManager? = null,
+    private val transferHistorySnapshotProvider: (() -> TransferHistorySessionSnapshot)? = null,
 ) {
     private val stateMutex = Mutex()
     private val _stateFlow = MutableStateFlow(SessionState.IDLE)
@@ -69,6 +71,7 @@ class SessionStateMachine(
         }
 
         if (shouldInvokeCancel) {
+            persistHistoryIfConfigured(outcome = TransferOutcome.CANCELLED)
             onCancel(reason)
         }
     }
@@ -87,8 +90,15 @@ class SessionStateMachine(
         }
 
         if (shouldInvokeComplete) {
+            persistHistoryIfConfigured(outcome = TransferOutcome.COMPLETED)
             onComplete()
         }
+    }
+
+    private suspend fun persistHistoryIfConfigured(outcome: TransferOutcome) {
+        val manager = transferHistoryManager ?: return
+        val snapshotProvider = transferHistorySnapshotProvider ?: return
+        manager.recordSessionEnd(snapshot = snapshotProvider(), outcome = outcome)
     }
 
     private companion object {
