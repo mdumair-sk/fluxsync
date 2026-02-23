@@ -59,6 +59,19 @@ data class ChunkPacket(
 
 object ChunkPacketCodec {
     const val HEADER_SIZE: Int = 32
+
+    fun writeTo(chunk: ChunkPacket, buffer: ByteBuffer) {
+        require(buffer.isDirect) { "ChunkPacketCodec requires a direct ByteBuffer" }
+
+        val requiredBytes = HEADER_SIZE + chunk.payloadLength
+        require(buffer.capacity() >= requiredBytes) {
+            "Buffer capacity (${buffer.capacity()}) is smaller than required bytes ($requiredBytes)"
+        }
+
+        buffer.clear()
+        chunk.writeTo(buffer)
+        buffer.flip()
+    }
 }
 
 object CRC32Helper {
