@@ -1,10 +1,5 @@
 package com.fluxsync.core.protocol
 
-enum class ChannelType {
-    WIFI,
-    USB_ADB,
-}
-
 enum class ChannelState {
     ACTIVE,
     DEGRADED,
