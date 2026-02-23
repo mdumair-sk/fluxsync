@@ -1,0 +1,8 @@
+<component name="ArtifactManager">
+  <artifact type="jar" name="transfer-engine-jvm">
+    <output-path>$PROJECT_DIR$/core/transfer-engine/build/libs</output-path>
+    <root id="archive" name="transfer-engine-jvm.jar">
+      <element id="module-output" name="fluxsync.core.transfer-engine.jvmMain" />
+    </root>
+  </artifact>
+</component>
