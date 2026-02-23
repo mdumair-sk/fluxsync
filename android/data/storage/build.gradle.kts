@@ -21,4 +21,5 @@ android {
 dependencies {
     implementation(projects.core.protocol)
     implementation(libs.kotlinx.coroutines.android)
+    implementation("androidx.documentfile:documentfile:1.0.1")
 }
