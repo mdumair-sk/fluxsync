@@ -23,12 +23,16 @@ kotlin {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(projects.core.protocol)
+            implementation(projects.core.resumability)
         }
         androidMain.dependencies {
             implementation(libs.kotlinx.coroutines.android)
         }
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
+        }
+        jvmTest.dependencies {
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
         }
     }
 }

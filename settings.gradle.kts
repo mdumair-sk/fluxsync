@@ -20,3 +20,4 @@ dependencyResolutionManagement {
 
 include(":core:protocol")
 include(":core:resumability")
+include(":core:transfer-engine")
