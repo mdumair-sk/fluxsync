@@ -8,6 +8,8 @@ java {
 }
 
 dependencies {
+    implementation(projects.core.protocol)
+    implementation(projects.core.transferEngine)
     implementation(libs.kotlinx.coroutines.core)
     // No external deps for ADB — uses plain socket to port 5037
 }
