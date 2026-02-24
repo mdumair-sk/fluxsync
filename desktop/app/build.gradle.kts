@@ -34,6 +34,9 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(compose.components.resources)
+
+    // QR generation
+    implementation("com.google.zxing:core:3.5.3")
 }
 
 compose.desktop {
