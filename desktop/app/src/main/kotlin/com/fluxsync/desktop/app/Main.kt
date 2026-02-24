@@ -29,6 +29,7 @@ import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.fluxsync.core.transfer.SessionState
+import com.fluxsync.core.transfer.TransferUiState
 import com.fluxsync.desktop.app.tray.DesktopTrayManager
 import com.fluxsync.desktop.app.tray.TrayUiState
 import java.awt.Desktop
@@ -38,11 +39,14 @@ import kotlinx.coroutines.flow.StateFlow
 
 interface DesktopTransferViewModel {
     val uiState: StateFlow<TransferUiState>
+    val trayUiState: StateFlow<DesktopTrayUiState>
     fun onFilesDropped(files: List<File>)
+    fun onPauseResume()
+    fun onCancel()
     fun declineConsent()
 }
 
-data class TransferUiState(
+data class DesktopTrayUiState(
     override val sessionState: SessionState,
     override val aggregateSpeedMbs: Float,
     override val overallProgressFraction: Float,
@@ -59,11 +63,11 @@ fun main() = application {
 
     val trayManager = remember {
         DesktopTrayManager(
-            uiState = viewModel.uiState,
+            uiState = viewModel.trayUiState,
             scope = scope,
             onOpenFluxSync = { windowState.isMinimized = false },
             onSendFile = { windowState.isMinimized = false },
-            onPause = { /* wired when pause action is available on view model */ },
+            onPause = viewModel::onPauseResume,
             onQuit = ::exitApplication,
         )
     }
@@ -81,6 +85,8 @@ fun main() = application {
             FluxSyncMainWindowContent(
                 state = uiState,
                 onFilesDropped = viewModel::onFilesDropped,
+                onPauseResume = viewModel::onPauseResume,
+                onCancel = viewModel::onCancel,
             )
 
             if (showGnomeAppIndicatorDialog) {
@@ -128,6 +134,8 @@ fun main() = application {
 private fun FluxSyncMainWindowContent(
     state: TransferUiState,
     onFilesDropped: (List<File>) -> Unit,
+    onPauseResume: () -> Unit,
+    onCancel: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -144,9 +152,11 @@ private fun FluxSyncMainWindowContent(
                 }
             },
     ) {
-        Text(
-            text = "FluxSync • ${state.sessionState}",
-            modifier = Modifier.align(Alignment.Center),
+        DesktopCockpitScreen(
+            state = state,
+            onPauseResume = onPauseResume,
+            onCancel = onCancel,
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }
