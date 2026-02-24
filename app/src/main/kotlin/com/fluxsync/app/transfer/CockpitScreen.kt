@@ -25,8 +25,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fluxsync.core.protocol.ChannelType
 import com.fluxsync.core.transfer.SessionState
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 
 private const val TWEEN_400 = 400
@@ -52,9 +55,22 @@ fun CockpitScreen(
     state: TransferUiState,
     onPauseResume: () -> Unit,
     onCancel: () -> Unit,
+    onAcceptConsent: () -> Unit,
+    onDeclineConsent: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var selectedChannel by remember { mutableStateOf<ChannelTelemetry?>(null) }
+    var pendingCountdownSeconds by remember { mutableStateOf(state.pendingConsentTimeoutSeconds) }
+
+    LaunchedEffect(state.sessionState) {
+        if (state.sessionState == SessionState.PENDING_CONSENT) {
+            pendingCountdownSeconds = state.pendingConsentTimeoutSeconds
+            while (pendingCountdownSeconds > 0 && state.sessionState == SessionState.PENDING_CONSENT) {
+                delay(1_000)
+                pendingCountdownSeconds -= 1
+            }
+        }
+    }
 
     Column(
         modifier = modifier
@@ -62,30 +78,107 @@ fun CockpitScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        SpeedGauge(speedMbs = state.aggregateSpeedMbs)
-        SplitterBar(channelStats = state.channelStats)
-        ChannelDetailChips(
-            channelStats = state.channelStats,
-            onChannelClick = { selectedChannel = it },
-        )
-        Text(
-            text = "ETA: ${formatEta(state.etaSeconds)}",
-            style = MaterialTheme.typography.titleMedium,
-        )
-        FileTransferList(
-            files = state.fileEntries,
-            modifier = Modifier.weight(1f),
-        )
-        BottomActionBar(
-            isPaused = state.sessionState == SessionState.RETRYING,
-            onPauseResume = onPauseResume,
-            onCancel = onCancel,
-        )
+        if (state.sessionState == SessionState.PENDING_CONSENT) {
+            PendingConsentState(
+                deviceName = state.pendingConsentDeviceName,
+                countdownSeconds = pendingCountdownSeconds,
+                onCancel = onCancel,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            SpeedGauge(speedMbs = state.aggregateSpeedMbs)
+            SplitterBar(channelStats = state.channelStats)
+            ChannelDetailChips(
+                channelStats = state.channelStats,
+                onChannelClick = { selectedChannel = it },
+            )
+            Text(
+                text = "ETA: ${formatEta(state.etaSeconds)}",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            FileTransferList(
+                files = state.fileEntries,
+                modifier = Modifier.weight(1f),
+            )
+            BottomActionBar(
+                isPaused = state.sessionState == SessionState.RETRYING,
+                onPauseResume = onPauseResume,
+                onCancel = onCancel,
+            )
+        }
     }
 
     selectedChannel?.let { telemetry ->
         ModalBottomSheet(onDismissRequest = { selectedChannel = null }) {
             ChannelDetails(selectedChannel = telemetry)
+        }
+    }
+
+    if (state.sessionState == SessionState.AWAITING_CONSENT) {
+        ModalBottomSheet(onDismissRequest = onDeclineConsent) {
+            IncomingConsentSheet(
+                senderDeviceName = state.consentSenderDeviceName,
+                fileSummary = state.consentFileSummary,
+                onAccept = onAcceptConsent,
+                onDecline = onDeclineConsent,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PendingConsentState(
+    deviceName: String,
+    countdownSeconds: Int,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        Text(
+            text = "Waiting for $deviceName to accept...",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            text = "Cancels in: ${countdownSeconds.coerceAtLeast(0)}s",
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
+            Text("Cancel")
+        }
+    }
+}
+
+@Composable
+private fun IncomingConsentSheet(
+    senderDeviceName: String,
+    fileSummary: String,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = senderDeviceName,
+            style = MaterialTheme.typography.titleLarge,
+        )
+        Text(
+            text = fileSummary,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        OutlinedButton(onClick = onDecline, modifier = Modifier.fillMaxWidth()) {
+            Text("DECLINE")
+        }
+        Button(onClick = onAccept, modifier = Modifier.fillMaxWidth()) {
+            Text("ACCEPT")
         }
     }
 }
