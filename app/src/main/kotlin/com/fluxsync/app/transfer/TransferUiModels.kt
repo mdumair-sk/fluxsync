@@ -10,6 +10,10 @@ data class TransferUiState(
     val overallProgressFraction: Float = 0f,
     val fileEntries: List<FileUiEntry> = emptyList(),
     val channelStats: List<ChannelTelemetry> = emptyList(),
+    val consentSenderDeviceName: String = "Unknown sender",
+    val consentFileSummary: String = "",
+    val pendingConsentDeviceName: String = "receiver",
+    val pendingConsentTimeoutSeconds: Int = 60,
 )
 
 data class ChannelTelemetry(
