@@ -62,4 +62,7 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
     implementation(libs.compose.activity)
+
+    // QR generation
+    implementation("com.google.zxing:core:3.5.3")
 }
