@@ -20,6 +20,7 @@ android {
 
 dependencies {
     implementation(projects.core.transferEngine)
+    implementation(projects.core.protocol)
     implementation(projects.android.data.network)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.core.ktx)

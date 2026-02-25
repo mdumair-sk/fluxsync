@@ -1,9 +1,23 @@
+buildscript {
+    repositories {
+        maven { url = uri("https://maven.pkg.jetbrains.space/public/p/compose/dev") }
+        mavenCentral()
+        google()
+    }
+}
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    alias(libs.plugins.kotlin.jvm)
+    id("org.jetbrains.kotlin.jvm")
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
+    }
 }
 
 java {
@@ -26,6 +40,7 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.swing)
+    implementation(libs.kotlinx.serialization.json)
 
     // JmDNS (also available via desktop:data:network, explicit here for clarity)
     implementation(libs.jmdns)
@@ -41,12 +56,12 @@ dependencies {
 
 compose.desktop {
     application {
-        mainClass = "com.fluxsync.desktop.MainKt"
+        mainClass = "com.fluxsync.desktop.app.MainKt"
 
         nativeDistributions {
             targetFormats(TargetFormat.Dmg, TargetFormat.Msi, TargetFormat.Deb)
             packageName = "FluxSync"
-            packageVersion = "0.1.0"
+            packageVersion = "1.0.0"
 
             linux {
                 iconFile.set(project.file("src/main/resources/icon.png"))

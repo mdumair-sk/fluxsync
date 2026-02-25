@@ -5,6 +5,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
 import java.math.BigInteger
+import java.net.Socket
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
@@ -26,13 +27,9 @@ private const val TAG = "CertificateManager"
 private const val KEYSTORE_TYPE = "AndroidKeyStore"
 private const val DEFAULT_ALIAS_PREFIX = "fluxsync_device_"
 
-actual class CertificateManager actual constructor() {
+actual class CertificateManager {
 
     private var onSoftwareCipherDetected: () -> Unit = {}
-
-    constructor(onSoftwareCipherDetected: () -> Unit) : this() {
-        this.onSoftwareCipherDetected = onSoftwareCipherDetected
-    }
 
     actual fun getOrCreateCertificate(deviceName: String): DeviceCertificate {
         val alias = buildAlias(deviceName)
@@ -143,11 +140,11 @@ actual class CertificateManager actual constructor() {
 
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
 
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, socket: SSLSocket) =
-                inspectCipher(socket.session)
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, socket: Socket) =
+                inspectCipher((socket as? SSLSocket)?.session)
 
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, socket: SSLSocket) =
-                inspectCipher(socket.session)
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, socket: Socket) =
+                inspectCipher((socket as? SSLSocket)?.session)
 
             override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, engine: SSLEngine) =
                 inspectCipher(engine.session)
@@ -172,22 +169,22 @@ actual class CertificateManager actual constructor() {
 
             override fun getAcceptedIssuers(): Array<X509Certificate> = delegate.acceptedIssuers
 
-            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, socket: SSLSocket) {
+            override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, socket: Socket) {
                 if (delegate is X509ExtendedTrustManager) {
                     delegate.checkClientTrusted(chain, authType, socket)
                 } else {
                     delegate.checkClientTrusted(chain, authType)
                 }
-                inspectCipher(socket.handshakeSession ?: socket.session)
+                inspectCipher((socket as? SSLSocket)?.let { it.handshakeSession ?: it.session })
             }
 
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, socket: SSLSocket) {
+            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String, socket: Socket) {
                 if (delegate is X509ExtendedTrustManager) {
                     delegate.checkServerTrusted(chain, authType, socket)
                 } else {
                     delegate.checkServerTrusted(chain, authType)
                 }
-                inspectCipher(socket.handshakeSession ?: socket.session)
+                inspectCipher((socket as? SSLSocket)?.let { it.handshakeSession ?: it.session })
             }
 
             override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String, engine: SSLEngine) {

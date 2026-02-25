@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
+    alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.android.library)
 }
 
@@ -22,11 +23,17 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.serialization.json)
             implementation(projects.core.protocol)
             implementation(projects.core.resumability)
+            implementation(projects.core.security)
         }
-        androidMain.dependencies {
+        androidMain {
+            kotlin.srcDir("src/jvmMain/kotlin")
+            kotlin.exclude("**/*.jvm.kt", "**/DebugLog.kt")
+            dependencies {
             implementation(libs.kotlinx.coroutines.android)
+        }
         }
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)

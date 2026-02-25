@@ -41,6 +41,7 @@ data class TransferUiState(
     val pendingConsentTimeoutSeconds: Int = 60,
 )
 
+@OptIn(FlowPreview::class)
 class TransferViewModel(
     private val drtlb: DRTLB,
     private val sessionMachine: SessionStateMachine,
@@ -59,7 +60,6 @@ class TransferViewModel(
     @Volatile
     private var trackedSentBytes: Long = 0L
 
-    @OptIn(FlowPreview::class)
     init {
         drtlb.telemetryFlow
             .sample(200)

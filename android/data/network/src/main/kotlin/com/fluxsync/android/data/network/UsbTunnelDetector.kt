@@ -17,10 +17,10 @@ enum class TunnelStatus {
 }
 
 class UsbTunnelDetector(
-    private val drtlb: DRTLB,
-    private val usbChannel: NetworkChannel,
-    private val onPortCollision: () -> Unit,
-    private val forceWifiOnly: () -> Boolean,
+        private val drtlb: DRTLB,
+        private val usbChannel: NetworkChannel,
+        private val onPortCollision: () -> Unit,
+        private val forceWifiOnly: () -> Boolean,
 ) {
     suspend fun pollLoop() {
         while (currentCoroutineContext().isActive) {
@@ -28,22 +28,29 @@ class UsbTunnelDetector(
                 when (verifyTunnelBinding(PORT)) {
                     TunnelStatus.ACTIVE -> {
                         if (usbChannel.state != ChannelState.ACTIVE) {
-                            Log.i(TAG, "USB tunnel detected on port=$PORT. Registering USB channel=${usbChannel.id}")
+                            Log.i(
+                                    TAG,
+                                    "USB tunnel detected on port=$PORT. Registering USB channel=${usbChannel.id}"
+                            )
                             usbChannel.state = ChannelState.ACTIVE
                             drtlb.registerChannel(usbChannel)
                         }
                     }
-
                     TunnelStatus.PORT_FREE_NO_TUNNEL -> {
                         if (usbChannel.state == ChannelState.ACTIVE) {
-                            Log.w(TAG, "USB tunnel no longer reachable on port=$PORT. Removing USB channel=${usbChannel.id}")
+                            Log.w(
+                                    TAG,
+                                    "USB tunnel no longer reachable on port=$PORT. Removing USB channel=${usbChannel.id}"
+                            )
                             usbChannel.state = ChannelState.OFFLINE
                             drtlb.removeChannel(usbChannel)
                         }
                     }
-
                     TunnelStatus.PORT_COLLISION -> {
-                        Log.e(TAG, "Port collision detected on $PORT. Non-FluxSync service is responding")
+                        Log.e(
+                                TAG,
+                                "Port collision detected on $PORT. Non-FluxSync service is responding"
+                        )
                         onPortCollision()
                     }
                 }
@@ -53,13 +60,18 @@ class UsbTunnelDetector(
         }
     }
 
-    private fun isPortReachable(host: String, port: Int, timeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS): Boolean {
+    private fun isPortReachable(
+            host: String,
+            port: Int,
+            timeoutMs: Int = DEFAULT_CONNECT_TIMEOUT_MS
+    ): Boolean {
         return runCatching {
-            Socket().use { socket ->
-                socket.connect(InetSocketAddress(host, port), timeoutMs)
-                true
-            }
-        }.getOrDefault(false)
+                    Socket().use { socket ->
+                        socket.connect(InetSocketAddress(host, port), timeoutMs)
+                        true
+                    }
+                }
+                .getOrDefault(false)
     }
 
     private fun verifyTunnelBinding(port: Int): TunnelStatus {
@@ -76,16 +88,17 @@ class UsbTunnelDetector(
 
     private fun isFluxSyncResponding(port: Int): Boolean {
         return runCatching {
-            Socket().use { socket ->
-                socket.soTimeout = HANDSHAKE_TIMEOUT_MS
-                socket.connect(InetSocketAddress(LOCALHOST, port), HANDSHAKE_TIMEOUT_MS)
+                    Socket().use { socket ->
+                        socket.soTimeout = HANDSHAKE_TIMEOUT_MS
+                        socket.connect(InetSocketAddress(LOCALHOST, port), HANDSHAKE_TIMEOUT_MS)
 
-                socket.getOutputStream().write(PROBE_BYTE)
-                socket.getOutputStream().flush()
+                        socket.getOutputStream().write(PROBE_BYTE)
+                        socket.getOutputStream().flush()
 
-                socket.getInputStream().read() == EXPECTED_PONG
-            }
-        }.getOrDefault(false)
+                        socket.getInputStream().read() == EXPECTED_PONG
+                    }
+                }
+                .getOrDefault(false)
     }
 
     private companion object {

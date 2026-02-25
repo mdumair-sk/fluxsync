@@ -10,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,7 +47,7 @@ class DRTLB(
     }
 
     fun onForceWifiOnlyChanged(enabled: Boolean) = runBlocking {
-        if (!enabled) return
+        if (!enabled) return@runBlocking
 
         channelsMutex.withLock {
             channels.removeAll { it.type == ChannelType.USB_ADB }
@@ -79,7 +80,7 @@ class DRTLB(
     private suspend fun channelWorker(channel: NetworkChannel) {
         while (true) {
             val chunk = try {
-                select {
+                select<ChunkPacket> {
                     retrySlot.onReceive { it }
                     chunkSource.onReceive { it }
                 }
@@ -99,7 +100,7 @@ class DRTLB(
     }
 
     private suspend fun telemetryLoop() {
-        while (isActive) {
+        while (currentCoroutineContext().isActive) {
             try {
                 val snapshot = channelsMutex.withLock { channels.toList() }
                 val totalThroughput = snapshot.sumOf { it.measuredThroughput }

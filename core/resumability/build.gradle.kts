@@ -25,8 +25,11 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(projects.core.protocol)
         }
-        androidMain.dependencies {
-            implementation(libs.kotlinx.coroutines.android)
+        androidMain {
+            kotlin.srcDir("src/jvmMain/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.coroutines.android)
+            }
         }
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)

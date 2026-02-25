@@ -25,11 +25,20 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }
-        androidMain.dependencies {
-            implementation(libs.kotlinx.coroutines.android)
+        androidMain {
+            kotlin.srcDir("src/jvmMain/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.coroutines.android)
+            }
         }
         jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
+        }
+        // Add kotlin test dependency for JVM tests so Test/assert* symbols are available
+        val jvmTest by getting {
+            dependencies {
+                implementation(kotlin("test"))
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.security.Security
 import java.security.cert.X509Certificate
 import java.util.Base64
 import java.util.Date
@@ -16,15 +17,11 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
-import sun.security.x509.AlgorithmId
-import sun.security.x509.CertificateAlgorithmId
-import sun.security.x509.CertificateSerialNumber
-import sun.security.x509.CertificateValidity
-import sun.security.x509.CertificateVersion
-import sun.security.x509.CertificateX509Key
-import sun.security.x509.X500Name
-import sun.security.x509.X509CertImpl
-import sun.security.x509.X509CertInfo
+import org.bouncycastle.asn1.x500.X500Name
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
+import org.bouncycastle.jce.provider.BouncyCastleProvider
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 
 actual class CertificateManager {
     actual fun getOrCreateCertificate(deviceName: String): DeviceCertificate {
@@ -98,31 +95,25 @@ actual class CertificateManager {
     private fun generateSelfSignedCertificate(keyPair: KeyPair, deviceName: String): X509Certificate {
         val now = Date()
         val expiry = Date(now.time + VALIDITY_WINDOW_MS)
-        val certInfo = X509CertInfo().apply {
-            val owner = X500Name("CN=${sanitizeCommonName(deviceName)}, OU=FluxSync, O=FluxSync")
-            set(X509CertInfo.VERSION, CertificateVersion(CertificateVersion.V3))
-            set(X509CertInfo.SERIAL_NUMBER, CertificateSerialNumber(BigInteger(64, SecureRandom())))
-            set(X509CertInfo.SUBJECT, owner)
-            set(X509CertInfo.ISSUER, owner)
-            set(X509CertInfo.VALIDITY, CertificateValidity(now, expiry))
-            set(X509CertInfo.KEY, CertificateX509Key(keyPair.public))
-            set(
-                X509CertInfo.ALGORITHM_ID,
-                CertificateAlgorithmId(AlgorithmId.get(SIGNATURE_ALGORITHM))
-            )
-        }
+        ensureBouncyCastle()
 
-        val certificate = X509CertImpl(certInfo)
-        certificate.sign(keyPair.private, SIGNATURE_ALGORITHM)
+        val subject = X500Name("CN=${sanitizeCommonName(deviceName)}, OU=FluxSync, O=FluxSync")
+        val signer = JcaContentSignerBuilder(SIGNATURE_ALGORITHM)
+            .setProvider(BOUNCY_CASTLE_PROVIDER)
+            .build(keyPair.private)
 
-        certInfo.set(
-            CertificateAlgorithmId.NAME + "." + CertificateAlgorithmId.ALGORITHM,
-            certificate.get(X509CertImpl.SIG_ALG)
-        )
+        val certHolder = JcaX509v3CertificateBuilder(
+            subject,
+            BigInteger(64, SecureRandom()),
+            now,
+            expiry,
+            subject,
+            keyPair.public
+        ).build(signer)
 
-        return X509CertImpl(certInfo).apply {
-            sign(keyPair.private, SIGNATURE_ALGORITHM)
-        }
+        return JcaX509CertificateConverter()
+            .setProvider(BOUNCY_CASTLE_PROVIDER)
+            .getCertificate(certHolder)
     }
 
     private fun sanitizeCommonName(deviceName: String): String =
@@ -143,12 +134,19 @@ actual class CertificateManager {
         const val DEFAULT_ALIAS = "device"
         const val SIGNATURE_ALGORITHM = "SHA256withRSA"
         const val VALIDITY_WINDOW_MS = 10L * 365L * 24L * 60L * 60L * 1000L
+        const val BOUNCY_CASTLE_PROVIDER = "BC"
         val STORE_PASSWORD = "fluxsync-device".toCharArray()
 
         val TRUST_ALL_MANAGER = object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<X509Certificate>?, authType: String?) = Unit
             override fun checkServerTrusted(chain: Array<X509Certificate>?, authType: String?) = Unit
             override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+        }
+
+        fun ensureBouncyCastle() {
+            if (Security.getProvider(BOUNCY_CASTLE_PROVIDER) == null) {
+                Security.addProvider(BouncyCastleProvider())
+            }
         }
     }
 }
