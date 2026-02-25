@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.compose.compiler)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -62,6 +63,18 @@ dependencies {
     implementation(libs.compose.ui.tooling.preview)
     implementation(libs.compose.material3)
     implementation(libs.compose.activity)
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // Room
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
+
+    // Security (EncryptedSharedPreferences)
+    implementation(libs.security.crypto)
+
+    // Serialization (for Room TypeConverters)
+    implementation(libs.kotlinx.serialization.json)
 
     // QR generation
     implementation("com.google.zxing:core:3.5.3")

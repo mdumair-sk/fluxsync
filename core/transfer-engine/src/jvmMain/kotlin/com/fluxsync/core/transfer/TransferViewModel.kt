@@ -3,9 +3,9 @@ package com.fluxsync.core.transfer
 import com.fluxsync.core.protocol.ChannelTelemetry
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,11 +18,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 data class FileUiEntry(
-    val fileId: Int,
-    val name: String,
-    val progressFraction: Float,
-    val outcome: FileOutcome?,
-    val hasFluxPart: Boolean,
+        val fileId: Int,
+        val name: String,
+        val progressFraction: Float,
+        val outcome: FileOutcome?,
+        val hasFluxPart: Boolean,
 )
 
 enum class FileOutcome {
@@ -32,20 +32,23 @@ enum class FileOutcome {
 }
 
 data class TransferUiState(
-    val sessionState: SessionState = SessionState.IDLE,
-    val aggregateSpeedMbs: Float = 0f,
-    val etaSeconds: Int = 0,
-    val overallProgressFraction: Float = 0f,
-    val fileEntries: List<FileUiEntry> = emptyList(),
-    val channelStats: List<ChannelTelemetry> = emptyList(),
-    val pendingConsentTimeoutSeconds: Int = 60,
+        val sessionState: SessionState = SessionState.IDLE,
+        val aggregateSpeedMbs: Float = 0f,
+        val etaSeconds: Int = 0,
+        val overallProgressFraction: Float = 0f,
+        val fileEntries: List<FileUiEntry> = emptyList(),
+        val channelStats: List<ChannelTelemetry> = emptyList(),
+        val pendingConsentTimeoutSeconds: Int = 60,
+        val consentSenderDeviceName: String = "Unknown sender",
+        val consentFileSummary: String = "",
+        val pendingConsentDeviceName: String = "receiver",
 )
 
 @OptIn(FlowPreview::class)
 class TransferViewModel(
-    private val drtlb: DRTLB,
-    private val sessionMachine: SessionStateMachine,
-    private val scope: CoroutineScope,
+        private val drtlb: DRTLB,
+        private val sessionMachine: SessionStateMachine,
+        private val scope: CoroutineScope,
 ) {
     private val _uiState = MutableStateFlow(TransferUiState())
     val uiState: StateFlow<TransferUiState> = _uiState.asStateFlow()
@@ -55,48 +58,50 @@ class TransferViewModel(
 
     private val pendingConsentCountdownFlow = MutableStateFlow(DEFAULT_CONSENT_TIMEOUT_SECONDS)
     private var pendingConsentCountdownJob: Job? = null
-    @Volatile
-    private var trackedTotalBytes: Long = 0L
-    @Volatile
-    private var trackedSentBytes: Long = 0L
+    @Volatile private var trackedTotalBytes: Long = 0L
+    @Volatile private var trackedSentBytes: Long = 0L
 
     init {
         drtlb.telemetryFlow
-            .sample(200)
-            .conflate()
-            .onEach { telemetry ->
-                _uiState.value = _uiState.value.let { current ->
-                    val updatedSpeed = telemetry.sumOf { it.throughputBytesPerSec }
-                    val etaSeconds = calculateEtaSeconds(speedBytesPerSec = updatedSpeed)
-                    current.copy(
-                        channelStats = telemetry,
-                        aggregateSpeedMbs = updatedSpeed.toFloat() / BYTES_PER_MEGABYTE,
-                        etaSeconds = etaSeconds,
-                    )
+                .sample(200)
+                .conflate()
+                .onEach { telemetry ->
+                    _uiState.value =
+                            _uiState.value.let { current ->
+                                val updatedSpeed = telemetry.sumOf { it.throughputBytesPerSec }
+                                val etaSeconds =
+                                        calculateEtaSeconds(speedBytesPerSec = updatedSpeed)
+                                current.copy(
+                                        channelStats = telemetry,
+                                        aggregateSpeedMbs =
+                                                updatedSpeed.toFloat() / BYTES_PER_MEGABYTE,
+                                        etaSeconds = etaSeconds,
+                                )
+                            }
                 }
-            }
-            .launchIn(scope)
+                .launchIn(scope)
 
-        sessionMachine.stateFlow
-            .sample(200)
-            .conflate()
-            .onEach { state ->
-                _uiState.value = _uiState.value.copy(sessionState = state)
-                if (state == SessionState.PENDING_CONSENT) {
-                    startPendingConsentCountdown()
-                } else {
-                    stopPendingConsentCountdown(reset = true)
+        sessionMachine
+                .stateFlow
+                .sample(200)
+                .conflate()
+                .onEach { state ->
+                    _uiState.value = _uiState.value.copy(sessionState = state)
+                    if (state == SessionState.PENDING_CONSENT) {
+                        startPendingConsentCountdown()
+                    } else {
+                        stopPendingConsentCountdown(reset = true)
+                    }
                 }
-            }
-            .launchIn(scope)
+                .launchIn(scope)
 
         pendingConsentCountdownFlow
-            .sample(200)
-            .conflate()
-            .onEach { seconds ->
-                _uiState.value = _uiState.value.copy(pendingConsentTimeoutSeconds = seconds)
-            }
-            .launchIn(scope)
+                .sample(200)
+                .conflate()
+                .onEach { seconds ->
+                    _uiState.value = _uiState.value.copy(pendingConsentTimeoutSeconds = seconds)
+                }
+                .launchIn(scope)
     }
 
     fun onFilesDropped(files: List<File>) {
@@ -104,14 +109,15 @@ class TransferViewModel(
             fileProgressMutex.withLock {
                 fileProgress.clear()
                 files.forEachIndexed { index, file ->
-                    fileProgress[index] = FileProgressRecord(
-                        fileId = index,
-                        name = file.name,
-                        bytesWritten = 0L,
-                        totalBytes = file.length().coerceAtLeast(0L),
-                        outcome = null,
-                        hasFluxPart = hasFluxPartFile(file),
-                    )
+                    fileProgress[index] =
+                            FileProgressRecord(
+                                    fileId = index,
+                                    name = file.name,
+                                    bytesWritten = 0L,
+                                    totalBytes = file.length().coerceAtLeast(0L),
+                                    outcome = null,
+                                    hasFluxPart = hasFluxPartFile(file),
+                            )
                 }
             }
 
@@ -128,9 +134,7 @@ class TransferViewModel(
     }
 
     fun onCancel() {
-        scope.launch {
-            sessionMachine.cancel(reason = "Cancelled by user")
-        }
+        scope.launch { sessionMachine.cancel(reason = "Cancelled by user") }
     }
 
     fun onConsentAccepted() {
@@ -140,22 +144,22 @@ class TransferViewModel(
     }
 
     fun onConsentDeclined() {
-        scope.launch {
-            sessionMachine.cancel(reason = "Consent declined")
-        }
+        scope.launch { sessionMachine.cancel(reason = "Consent declined") }
     }
 
     fun updateFileProgress(fileId: Int, bytesWritten: Long, totalBytes: Long) {
         scope.launch {
             fileProgressMutex.withLock {
-                val existing = requireNotNull(fileProgress[fileId]) {
-                    "Unable to update progress for unknown fileId=$fileId"
-                }
+                val existing =
+                        requireNotNull(fileProgress[fileId]) {
+                            "Unable to update progress for unknown fileId=$fileId"
+                        }
 
-                fileProgress[fileId] = existing.copy(
-                    bytesWritten = bytesWritten.coerceAtLeast(0L),
-                    totalBytes = totalBytes.coerceAtLeast(0L),
-                )
+                fileProgress[fileId] =
+                        existing.copy(
+                                bytesWritten = bytesWritten.coerceAtLeast(0L),
+                                totalBytes = totalBytes.coerceAtLeast(0L),
+                        )
             }
 
             refreshFileUiState()
@@ -165,14 +169,16 @@ class TransferViewModel(
     fun markFileComplete(fileId: Int) {
         scope.launch {
             fileProgressMutex.withLock {
-                val existing = requireNotNull(fileProgress[fileId]) {
-                    "Unable to mark complete for unknown fileId=$fileId"
-                }
+                val existing =
+                        requireNotNull(fileProgress[fileId]) {
+                            "Unable to mark complete for unknown fileId=$fileId"
+                        }
 
-                fileProgress[fileId] = existing.copy(
-                    bytesWritten = existing.totalBytes,
-                    outcome = FileOutcome.COMPLETED,
-                )
+                fileProgress[fileId] =
+                        existing.copy(
+                                bytesWritten = existing.totalBytes,
+                                outcome = FileOutcome.COMPLETED,
+                        )
             }
 
             refreshFileUiState()
@@ -182,11 +188,13 @@ class TransferViewModel(
     fun markFileFailed(fileId: Int) {
         scope.launch {
             fileProgressMutex.withLock {
-                val existing = requireNotNull(fileProgress[fileId]) {
-                    "Unable to mark failed for unknown fileId=$fileId"
-                }
+                val existing =
+                        requireNotNull(fileProgress[fileId]) {
+                            "Unable to mark failed for unknown fileId=$fileId"
+                        }
 
-                val outcome = if (existing.bytesWritten > 0L) FileOutcome.PARTIAL else FileOutcome.FAILED
+                val outcome =
+                        if (existing.bytesWritten > 0L) FileOutcome.PARTIAL else FileOutcome.FAILED
                 fileProgress[fileId] = existing.copy(outcome = outcome)
             }
 
@@ -197,14 +205,16 @@ class TransferViewModel(
     private fun startPendingConsentCountdown() {
         pendingConsentCountdownJob?.cancel()
         pendingConsentCountdownFlow.value = DEFAULT_CONSENT_TIMEOUT_SECONDS
-        pendingConsentCountdownJob = scope.launch {
-            var secondsLeft = DEFAULT_CONSENT_TIMEOUT_SECONDS
-            while (secondsLeft > 0 && sessionMachine.stateFlow.value == SessionState.PENDING_CONSENT) {
-                delay(1_000)
-                secondsLeft -= 1
-                pendingConsentCountdownFlow.value = secondsLeft
-            }
-        }
+        pendingConsentCountdownJob =
+                scope.launch {
+                    var secondsLeft = DEFAULT_CONSENT_TIMEOUT_SECONDS
+                    while (secondsLeft > 0 &&
+                            sessionMachine.stateFlow.value == SessionState.PENDING_CONSENT) {
+                        delay(1_000)
+                        secondsLeft -= 1
+                        pendingConsentCountdownFlow.value = secondsLeft
+                    }
+                }
     }
 
     private fun stopPendingConsentCountdown(reset: Boolean) {
@@ -222,27 +232,38 @@ class TransferViewModel(
         val totalWrittenBytes = snapshot.sumOf { it.bytesWritten.coerceIn(0L, it.totalBytes) }
         trackedTotalBytes = totalBytes
         trackedSentBytes = totalWrittenBytes
-        val overallProgress = if (totalBytes > 0L) {
-            (totalWrittenBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-        } else {
-            0f
-        }
+        val overallProgress =
+                if (totalBytes > 0L) {
+                    (totalWrittenBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
 
-        _uiState.value = _uiState.value.let { current ->
-            val speedBytesPerSec = (current.aggregateSpeedMbs * BYTES_PER_MEGABYTE).toLong()
-            current.copy(
-                overallProgressFraction = overallProgress,
-                etaSeconds = calculateEtaSeconds(totalBytes, totalWrittenBytes, speedBytesPerSec),
-                fileEntries = snapshot.map { it.toUiEntry() },
-            )
-        }
+        _uiState.value =
+                _uiState.value.let { current ->
+                    val speedBytesPerSec = (current.aggregateSpeedMbs * BYTES_PER_MEGABYTE).toLong()
+                    current.copy(
+                            overallProgressFraction = overallProgress,
+                            etaSeconds =
+                                    calculateEtaSeconds(
+                                            totalBytes,
+                                            totalWrittenBytes,
+                                            speedBytesPerSec
+                                    ),
+                            fileEntries = snapshot.map { it.toUiEntry() },
+                    )
+                }
     }
 
     private fun calculateEtaSeconds(speedBytesPerSec: Long): Int {
         return calculateEtaSeconds(trackedTotalBytes, trackedSentBytes, speedBytesPerSec)
     }
 
-    private fun calculateEtaSeconds(totalBytes: Long, bytesSent: Long, speedBytesPerSec: Long): Int {
+    private fun calculateEtaSeconds(
+            totalBytes: Long,
+            bytesSent: Long,
+            speedBytesPerSec: Long
+    ): Int {
         if (speedBytesPerSec <= 0L) return 0
 
         val remainingBytes = (totalBytes - bytesSent).coerceAtLeast(0L)
@@ -255,26 +276,27 @@ class TransferViewModel(
     }
 
     private data class FileProgressRecord(
-        val fileId: Int,
-        val name: String,
-        val bytesWritten: Long,
-        val totalBytes: Long,
-        val outcome: FileOutcome?,
-        val hasFluxPart: Boolean,
+            val fileId: Int,
+            val name: String,
+            val bytesWritten: Long,
+            val totalBytes: Long,
+            val outcome: FileOutcome?,
+            val hasFluxPart: Boolean,
     ) {
         fun toUiEntry(): FileUiEntry {
-            val progress = if (totalBytes > 0L) {
-                (bytesWritten.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
-            } else {
-                0f
-            }
+            val progress =
+                    if (totalBytes > 0L) {
+                        (bytesWritten.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+                    } else {
+                        0f
+                    }
 
             return FileUiEntry(
-                fileId = fileId,
-                name = name,
-                progressFraction = progress,
-                outcome = outcome,
-                hasFluxPart = hasFluxPart,
+                    fileId = fileId,
+                    name = name,
+                    progressFraction = progress,
+                    outcome = outcome,
+                    hasFluxPart = hasFluxPart,
             )
         }
     }

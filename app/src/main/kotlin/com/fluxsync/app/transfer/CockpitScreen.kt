@@ -42,22 +42,27 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fluxsync.core.protocol.ChannelState
+import com.fluxsync.core.protocol.ChannelTelemetry
 import com.fluxsync.core.protocol.ChannelType
+import com.fluxsync.core.transfer.FileOutcome
+import com.fluxsync.core.transfer.FileUiEntry
 import com.fluxsync.core.transfer.SessionState
-import kotlinx.coroutines.delay
+import com.fluxsync.core.transfer.TransferUiState
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 private const val TWEEN_400 = 400
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CockpitScreen(
-    state: TransferUiState,
-    onPauseResume: () -> Unit,
-    onCancel: () -> Unit,
-    onAcceptConsent: () -> Unit,
-    onDeclineConsent: () -> Unit,
-    modifier: Modifier = Modifier,
+        state: TransferUiState,
+        onPauseResume: () -> Unit,
+        onCancel: () -> Unit,
+        onAcceptConsent: () -> Unit,
+        onDeclineConsent: () -> Unit,
+        modifier: Modifier = Modifier,
 ) {
     var selectedChannel by remember { mutableStateOf<ChannelTelemetry?>(null) }
     var pendingCountdownSeconds by remember { mutableStateOf(state.pendingConsentTimeoutSeconds) }
@@ -65,7 +70,8 @@ fun CockpitScreen(
     LaunchedEffect(state.sessionState) {
         if (state.sessionState == SessionState.PENDING_CONSENT) {
             pendingCountdownSeconds = state.pendingConsentTimeoutSeconds
-            while (pendingCountdownSeconds > 0 && state.sessionState == SessionState.PENDING_CONSENT) {
+            while (pendingCountdownSeconds > 0 &&
+                    state.sessionState == SessionState.PENDING_CONSENT) {
                 delay(1_000)
                 pendingCountdownSeconds -= 1
             }
@@ -73,37 +79,35 @@ fun CockpitScreen(
     }
 
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = modifier.fillMaxSize().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (state.sessionState == SessionState.PENDING_CONSENT) {
             PendingConsentState(
-                deviceName = state.pendingConsentDeviceName,
-                countdownSeconds = pendingCountdownSeconds,
-                onCancel = onCancel,
-                modifier = Modifier.fillMaxSize(),
+                    deviceName = state.pendingConsentDeviceName,
+                    countdownSeconds = pendingCountdownSeconds,
+                    onCancel = onCancel,
+                    modifier = Modifier.fillMaxSize(),
             )
         } else {
             SpeedGauge(speedMbs = state.aggregateSpeedMbs)
             SplitterBar(channelStats = state.channelStats)
             ChannelDetailChips(
-                channelStats = state.channelStats,
-                onChannelClick = { selectedChannel = it },
+                    channelStats = state.channelStats,
+                    onChannelClick = { selectedChannel = it },
             )
             Text(
-                text = "ETA: ${formatEta(state.etaSeconds)}",
-                style = MaterialTheme.typography.titleMedium,
+                    text = "ETA: ${formatEta(state.etaSeconds)}",
+                    style = MaterialTheme.typography.titleMedium,
             )
             FileTransferList(
-                files = state.fileEntries,
-                modifier = Modifier.weight(1f),
+                    files = state.fileEntries,
+                    modifier = Modifier.weight(1f),
             )
             BottomActionBar(
-                isPaused = state.sessionState == SessionState.RETRYING,
-                onPauseResume = onPauseResume,
-                onCancel = onCancel,
+                    isPaused = state.sessionState == SessionState.RETRYING,
+                    onPauseResume = onPauseResume,
+                    onCancel = onCancel,
             )
         }
     }
@@ -117,10 +121,10 @@ fun CockpitScreen(
     if (state.sessionState == SessionState.AWAITING_CONSENT) {
         ModalBottomSheet(onDismissRequest = onDeclineConsent) {
             IncomingConsentSheet(
-                senderDeviceName = state.consentSenderDeviceName,
-                fileSummary = state.consentFileSummary,
-                onAccept = onAcceptConsent,
-                onDecline = onDeclineConsent,
+                    senderDeviceName = state.consentSenderDeviceName,
+                    fileSummary = state.consentFileSummary,
+                    onAccept = onAcceptConsent,
+                    onDecline = onDeclineConsent,
             )
         }
     }
@@ -128,120 +132,124 @@ fun CockpitScreen(
 
 @Composable
 private fun PendingConsentState(
-    deviceName: String,
-    countdownSeconds: Int,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier,
+        deviceName: String,
+        countdownSeconds: Int,
+        onCancel: () -> Unit,
+        modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-        horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = modifier,
+            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         Text(
-            text = "Waiting for $deviceName to accept...",
-            style = MaterialTheme.typography.titleMedium,
+                text = "Waiting for $deviceName to accept...",
+                style = MaterialTheme.typography.titleMedium,
         )
         Text(
-            text = "Cancels in: ${countdownSeconds.coerceAtLeast(0)}s",
-            style = MaterialTheme.typography.bodyLarge,
+                text = "Cancels in: ${countdownSeconds.coerceAtLeast(0)}s",
+                style = MaterialTheme.typography.bodyLarge,
         )
-        Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) {
-            Text("Cancel")
-        }
+        Button(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
     }
 }
 
 @Composable
 private fun IncomingConsentSheet(
-    senderDeviceName: String,
-    fileSummary: String,
-    onAccept: () -> Unit,
-    onDecline: () -> Unit,
+        senderDeviceName: String,
+        fileSummary: String,
+        onAccept: () -> Unit,
+        onDecline: () -> Unit,
 ) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(
-            text = senderDeviceName,
-            style = MaterialTheme.typography.titleLarge,
+                text = senderDeviceName,
+                style = MaterialTheme.typography.titleLarge,
         )
         Text(
-            text = fileSummary,
-            style = MaterialTheme.typography.bodyMedium,
+                text = fileSummary,
+                style = MaterialTheme.typography.bodyMedium,
         )
-        OutlinedButton(onClick = onDecline, modifier = Modifier.fillMaxWidth()) {
-            Text("DECLINE")
-        }
-        Button(onClick = onAccept, modifier = Modifier.fillMaxWidth()) {
-            Text("ACCEPT")
-        }
+        OutlinedButton(onClick = onDecline, modifier = Modifier.fillMaxWidth()) { Text("DECLINE") }
+        Button(onClick = onAccept, modifier = Modifier.fillMaxWidth()) { Text("ACCEPT") }
     }
 }
 
 @Composable
 private fun SpeedGauge(speedMbs: Float) {
-    val animatedSpeed by animateFloatAsState(
-        targetValue = speedMbs.coerceAtLeast(0f),
-        animationSpec = tween(durationMillis = TWEEN_400),
-        label = "speedGauge",
-    )
+    val animatedSpeed by
+            animateFloatAsState(
+                    targetValue = speedMbs.coerceAtLeast(0f),
+                    animationSpec = tween(durationMillis = TWEEN_400),
+                    label = "speedGauge",
+            )
 
     Row(verticalAlignment = Alignment.Bottom) {
         Text(
-            text = String.format("%.1f", animatedSpeed),
-            fontSize = 52.sp,
-            lineHeight = 56.sp,
-            fontWeight = FontWeight.Bold,
+                text = String.format("%.1f", animatedSpeed),
+                fontSize = 52.sp,
+                lineHeight = 56.sp,
+                fontWeight = FontWeight.Bold,
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = "MB/s",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp),
+                text = "MB/s",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(bottom = 8.dp),
         )
     }
 }
 
 @Composable
 private fun SplitterBar(
-    channelStats: List<ChannelTelemetry>,
-    modifier: Modifier = Modifier,
+        channelStats: List<ChannelTelemetry>,
+        modifier: Modifier = Modifier,
 ) {
-    val wifiFraction = channelStats.firstOrNull { it.type == ChannelType.WIFI }?.weightFraction ?: 0f
-    val usbFraction = channelStats.firstOrNull { it.type == ChannelType.USB_ADB }?.weightFraction ?: 0f
-    val degradedFraction = channelStats
-        .filter { it.state == ChannelStateUi.DEGRADED || it.state == ChannelStateUi.OFFLINE }
-        .sumOf { it.weightFraction.toDouble() }
-        .toFloat()
+    val wifiFraction =
+            channelStats.firstOrNull { it.type == ChannelType.WIFI }?.weightFraction ?: 0f
+    val usbFraction =
+            channelStats.firstOrNull { it.type == ChannelType.USB_ADB }?.weightFraction ?: 0f
+    val degradedFraction =
+            channelStats
+                    .filter {
+                        it.state == ChannelState.DEGRADED || it.state == ChannelState.OFFLINE
+                    }
+                    .sumOf { it.weightFraction.toDouble() }
+                    .toFloat()
 
-    val animatedWifi by animateFloatAsState(
-        targetValue = wifiFraction.coerceIn(0f, 1f),
-        animationSpec = tween(durationMillis = TWEEN_400),
-        label = "splitterWifi",
-    )
-    val animatedUsb by animateFloatAsState(
-        targetValue = usbFraction.coerceIn(0f, 1f),
-        animationSpec = tween(durationMillis = TWEEN_400),
-        label = "splitterUsb",
-    )
-    val animatedDegraded by animateFloatAsState(
-        targetValue = degradedFraction.coerceIn(0f, 1f),
-        animationSpec = tween(durationMillis = TWEEN_400),
-        label = "splitterDegraded",
-    )
+    val animatedWifi by
+            animateFloatAsState(
+                    targetValue = wifiFraction.coerceIn(0f, 1f),
+                    animationSpec = tween(durationMillis = TWEEN_400),
+                    label = "splitterWifi",
+            )
+    val animatedUsb by
+            animateFloatAsState(
+                    targetValue = usbFraction.coerceIn(0f, 1f),
+                    animationSpec = tween(durationMillis = TWEEN_400),
+                    label = "splitterUsb",
+            )
+    val animatedDegraded by
+            animateFloatAsState(
+                    targetValue = degradedFraction.coerceIn(0f, 1f),
+                    animationSpec = tween(durationMillis = TWEEN_400),
+                    label = "splitterDegraded",
+            )
 
     val (wifi, usb, degraded) = normalize(animatedWifi, animatedUsb, animatedDegraded)
 
     Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(28.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp)),
+            modifier =
+                    modifier.fillMaxWidth()
+                            .height(28.dp)
+                            .background(
+                                    MaterialTheme.colorScheme.surfaceVariant,
+                                    RoundedCornerShape(14.dp)
+                            ),
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val radius = CornerRadius(size.height / 2f, size.height / 2f)
@@ -250,22 +258,22 @@ private fun SplitterBar(
             val degradedWidth = size.width * degraded
 
             drawRoundRect(
-                color = Color(0xFF2196F3),
-                topLeft = Offset(0f, 0f),
-                size = Size(wifiWidth, size.height),
-                cornerRadius = radius,
+                    color = Color(0xFF2196F3),
+                    topLeft = Offset(0f, 0f),
+                    size = Size(wifiWidth, size.height),
+                    cornerRadius = radius,
             )
             drawRoundRect(
-                color = Color(0xFFFFB300),
-                topLeft = Offset(wifiWidth, 0f),
-                size = Size(usbWidth, size.height),
-                cornerRadius = radius,
+                    color = Color(0xFFFFB300),
+                    topLeft = Offset(wifiWidth, 0f),
+                    size = Size(usbWidth, size.height),
+                    cornerRadius = radius,
             )
             drawRoundRect(
-                color = Color(0xFF9E9E9E),
-                topLeft = Offset(wifiWidth + usbWidth, 0f),
-                size = Size(degradedWidth, size.height),
-                cornerRadius = radius,
+                    color = Color(0xFF9E9E9E),
+                    topLeft = Offset(wifiWidth + usbWidth, 0f),
+                    size = Size(degradedWidth, size.height),
+                    cornerRadius = radius,
             )
         }
 
@@ -282,9 +290,9 @@ private fun SegmentLabel(name: String, fraction: Float, modifier: Modifier = Mod
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         if (fraction > 0.2f) {
             Text(
-                text = "$name ${(fraction * 100).roundToInt()}%",
-                color = Color.White,
-                style = MaterialTheme.typography.labelSmall,
+                    text = "$name ${(fraction * 100).roundToInt()}%",
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelSmall,
             )
         }
     }
@@ -292,19 +300,20 @@ private fun SegmentLabel(name: String, fraction: Float, modifier: Modifier = Mod
 
 @Composable
 private fun ChannelDetailChips(
-    channelStats: List<ChannelTelemetry>,
-    onChannelClick: (ChannelTelemetry) -> Unit,
+        channelStats: List<ChannelTelemetry>,
+        onChannelClick: (ChannelTelemetry) -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         channelStats.forEach { telemetry ->
-            val label = when (telemetry.type) {
-                ChannelType.WIFI -> "WiFi: ${telemetry.latencyMs}ms · -62dBm"
-                ChannelType.USB_ADB -> "USB: ${telemetry.latencyMs}ms · USB 3.0"
-            }
+            val label =
+                    when (telemetry.type) {
+                        ChannelType.WIFI -> "WiFi: ${telemetry.latencyMs}ms · -62dBm"
+                        ChannelType.USB_ADB -> "USB: ${telemetry.latencyMs}ms · USB 3.0"
+                    }
             AssistChip(
-                onClick = { onChannelClick(telemetry) },
-                label = { Text(label) },
-                colors = AssistChipDefaults.assistChipColors(),
+                    onClick = { onChannelClick(telemetry) },
+                    label = { Text(label) },
+                    colors = AssistChipDefaults.assistChipColors(),
             )
         }
     }
@@ -312,12 +321,12 @@ private fun ChannelDetailChips(
 
 @Composable
 private fun FileTransferList(
-    files: List<FileUiEntry>,
-    modifier: Modifier = Modifier,
+        files: List<FileUiEntry>,
+        modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(items = files, key = { fileEntry -> fileEntry.fileId }) { fileEntry ->
             FileRow(fileEntry = fileEntry)
@@ -330,76 +339,74 @@ private fun FileTransferList(
 private fun FileRow(fileEntry: FileUiEntry) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(text = fileEntry.name, style = MaterialTheme.typography.bodyLarge)
                 if (fileEntry.hasFluxPart) {
                     Text(
-                        text = " ↺",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                            text = " ↺",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
                     )
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "${(fileEntry.progressFraction * 100).roundToInt()}%",
-                    style = MaterialTheme.typography.bodyMedium,
+                        text = "${(fileEntry.progressFraction * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.bodyMedium,
                 )
                 if (fileEntry.outcome == FileOutcome.FAILED) {
                     Text(
-                        text = " ✕",
-                        color = MaterialTheme.colorScheme.error,
-                        fontWeight = FontWeight.Bold,
+                            text = " ✕",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold,
                     )
                 }
             }
         }
         LinearProgressIndicator(
-            progress = { fileEntry.progressFraction.coerceIn(0f, 1f) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 6.dp),
+                progress = { fileEntry.progressFraction.coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
         )
     }
 }
 
 @Composable
 private fun BottomActionBar(
-    isPaused: Boolean,
-    onPauseResume: () -> Unit,
-    onCancel: () -> Unit,
+        isPaused: Boolean,
+        onPauseResume: () -> Unit,
+        onCancel: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Button(onClick = onPauseResume, modifier = Modifier.weight(1f)) {
             Text(if (isPaused) "Resume" else "Pause")
         }
-        Button(onClick = onCancel, modifier = Modifier.weight(1f)) {
-            Text("Cancel")
-        }
+        Button(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
     }
 }
 
 @Composable
 private fun ChannelDetails(selectedChannel: ChannelTelemetry) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = if (selectedChannel.type == ChannelType.WIFI) "Wi‑Fi Channel" else "USB Channel",
-            style = MaterialTheme.typography.titleLarge,
+                text =
+                        if (selectedChannel.type == ChannelType.WIFI) "Wi‑Fi Channel"
+                        else "USB Channel",
+                style = MaterialTheme.typography.titleLarge,
         )
         Text("Latency: ${selectedChannel.latencyMs} ms")
-        Text("Throughput: ${"%.2f".format(selectedChannel.throughputBytesPerSec / (1024f * 1024f))} MB/s")
+        Text(
+                "Throughput: ${"%.2f".format(selectedChannel.throughputBytesPerSec / (1024f * 1024f))} MB/s"
+        )
         Text("Weight: ${(selectedChannel.weightFraction * 100).roundToInt()}%")
         Text("Buffer Fill: ${selectedChannel.bufferFillPercent.roundToInt()}%")
         Text("State: ${selectedChannel.state}")
@@ -418,8 +425,9 @@ private fun formatEta(etaSeconds: Int): String {
     val minutes = (etaSeconds % 3600) / 60
     val seconds = etaSeconds % 60
     return buildString {
-        if (hours > 0) append("${hours}h ")
-        if (minutes > 0 || hours > 0) append("${minutes}m ")
-        append("${seconds}s")
-    }.trim()
+                if (hours > 0) append("${hours}h ")
+                if (minutes > 0 || hours > 0) append("${minutes}m ")
+                append("${seconds}s")
+            }
+            .trim()
 }
