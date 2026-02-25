@@ -174,6 +174,7 @@ private fun GnomeAppIndicatorDialog(
 ) {
     AlertDialog(
             onDismissRequest = onDismiss,
+            modifier = Modifier,
             title = { Text("Enable GNOME tray support") },
             text = {
                 Text(
