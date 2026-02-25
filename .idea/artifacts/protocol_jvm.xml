@@ -1,8 +1,0 @@
-<component name="ArtifactManager">
-  <artifact type="jar" name="protocol-jvm">
-    <output-path>$PROJECT_DIR$/core/protocol/build/libs</output-path>
-    <root id="archive" name="protocol-jvm.jar">
-      <element id="module-output" name="fluxsync.core.protocol.jvmMain" />
-    </root>
-  </artifact>
-</component>
