@@ -56,7 +56,9 @@ If you are contributing to the core engine, you must abide by these invariants:
  * Never allocate on the hot path. Use ByteBuffer.allocateDirect() once and reuse it. Never use ByteBuffer.allocate().
  * Strict Chunk Assembly Order: When writing received chunks to disk, the order must strictly be: CRC32 Check → Write under Kotlin Mutex → Mark AtomicIntegerArray → Debounce .fluxpart.
  * Fail loudly, recover gracefully. No silent catches. If a socket dies, mark the channel DEGRADED, re-queue the chunk to the retrySlot, and log it.
+ * 
 👨‍💻 Author
 Developed by Umair
+
 📄 License
 Distributed under the Apache 2.0 License. See LICENSE for more information.
