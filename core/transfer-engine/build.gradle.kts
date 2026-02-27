@@ -30,7 +30,7 @@ kotlin {
         }
         androidMain {
             kotlin.srcDir("src/jvmMain/kotlin")
-            kotlin.exclude("**/*.jvm.kt", "**/DebugLog.kt")
+            kotlin.exclude("**/*.jvm.kt")
             dependencies {
             implementation(libs.kotlinx.coroutines.android)
         }
