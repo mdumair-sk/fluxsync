@@ -9,6 +9,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,22 +21,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindow
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.fluxsync.core.security.CertificateManager
+import com.fluxsync.core.security.JsonFileTrustStore
 import com.fluxsync.core.transfer.DRTLB
+import com.fluxsync.core.transfer.HomeViewModel
 import com.fluxsync.core.transfer.SessionState
 import com.fluxsync.core.transfer.SessionStateMachine
 import com.fluxsync.core.transfer.TransferUiState
 import com.fluxsync.core.transfer.TransferViewModel
+import com.fluxsync.desktop.app.home.DesktopHomeScreen
 import com.fluxsync.desktop.app.tray.DesktopTrayManager
 import com.fluxsync.desktop.app.tray.TrayUiState
+import com.fluxsync.desktop.data.network.DesktopMdnsDiscovery
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
+import java.util.logging.ConsoleHandler
+import java.util.logging.Level
+import java.util.logging.Logger
+import java.util.logging.SimpleFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -59,9 +69,44 @@ data class DesktopTrayUiState(
         override val isPaused: Boolean,
 ) : TrayUiState
 
+enum class AppScreen {
+    HOME,
+    TRANSFER
+}
+
+data class DesktopViewModels(
+        val homeViewModel: HomeViewModel,
+        val transferViewModel: DesktopTransferViewModel,
+        val mdnsDiscovery: DesktopMdnsDiscovery
+)
+
 fun main() = application {
-    val viewModel = provideTransferViewModel()
+    val rootLogger = Logger.getLogger("")
+    rootLogger.handlers.forEach { rootLogger.removeHandler(it) }
+    val consoleHandler = ConsoleHandler()
+    consoleHandler.level = Level.ALL
+    consoleHandler.formatter = SimpleFormatter()
+    rootLogger.addHandler(consoleHandler)
+    rootLogger.level = Level.ALL
+
+    val viewModels = provideViewModels()
+    val homeViewModel = viewModels.homeViewModel
+    val viewModel = viewModels.transferViewModel
+    val mdnsDiscovery = viewModels.mdnsDiscovery
+
+    val homeUiState by homeViewModel.uiState.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+
+    var currentScreen by remember { mutableStateOf(AppScreen.HOME) }
+
+    LaunchedEffect(Unit) {
+        mdnsDiscovery.start()
+        val certManager = CertificateManager()
+        val deviceName = System.getProperty("user.name") ?: "Desktop"
+        val cert = runCatching { certManager.getOrCreateCertificate(deviceName) }.getOrNull()
+        val fingerprint = cert?.sha256Fingerprint ?: "unknown"
+        mdnsDiscovery.bindAndAdvertise(deviceName, fingerprint)
+    }
 
     val windowState = rememberWindowState()
     var showGnomeAppIndicatorDialog by remember { mutableStateOf(isGnomeDesktop()) }
@@ -86,12 +131,35 @@ fun main() = application {
             state = windowState,
     ) {
         MaterialTheme {
-            FluxSyncMainWindowContent(
-                    state = uiState,
-                    onFilesDropped = viewModel::onFilesDropped,
-                    onPauseResume = viewModel::onPauseResume,
-                    onCancel = viewModel::onCancel,
-            )
+            Box(
+                    modifier = Modifier.fillMaxSize().background(Color(0xFFF8FAFD)),
+            ) {
+                when (currentScreen) {
+                    AppScreen.HOME ->
+                            DesktopHomeScreen(
+                                    uiState = homeUiState,
+                                    localIpAddress = "0.0.0.0",
+                                    localPort = 5001,
+                                    localCertFingerprint = "unknown",
+                                    onFilesDropped = { files ->
+                                        viewModel.onFilesDropped(files)
+                                        currentScreen = AppScreen.TRANSFER
+                                    },
+                                    onDeviceSelected = { /* Phase 11 */},
+                                    onManualIpSubmitted = { ip, port ->
+                                        homeViewModel.onManualIpSubmitted(ip, port)
+                                    },
+                                    modifier = Modifier.fillMaxSize(),
+                            )
+                    AppScreen.TRANSFER ->
+                            DesktopCockpitScreen(
+                                    state = uiState,
+                                    onPauseResume = viewModel::onPauseResume,
+                                    onCancel = viewModel::onCancel,
+                                    modifier = Modifier.fillMaxSize(),
+                            )
+                }
+            }
 
             if (showGnomeAppIndicatorDialog) {
                 GnomeAppIndicatorDialog(
@@ -104,7 +172,7 @@ fun main() = application {
             }
 
             if (uiState.sessionState == SessionState.AWAITING_CONSENT && !windowState.isMinimized) {
-                Dialog(onCloseRequest = viewModel::declineConsent) {
+                DialogWindow(onCloseRequest = viewModel::declineConsent) {
                     ConsentContent(
                             onAccept = { /* wired in phase 11 */},
                             onDecline = viewModel::declineConsent,
@@ -136,25 +204,6 @@ fun main() = application {
 }
 
 @Composable
-private fun FluxSyncMainWindowContent(
-        state: TransferUiState,
-        onFilesDropped: (List<File>) -> Unit,
-        onPauseResume: () -> Unit,
-        onCancel: () -> Unit,
-) {
-    Box(
-            modifier = Modifier.fillMaxSize().background(Color(0xFFF8FAFD)),
-    ) {
-        DesktopCockpitScreen(
-                state = state,
-                onPauseResume = onPauseResume,
-                onCancel = onCancel,
-                modifier = Modifier.fillMaxSize(),
-        )
-    }
-}
-
-@Composable
 private fun ConsentContent(
         onAccept: () -> Unit,
         onDecline: () -> Unit,
@@ -174,7 +223,6 @@ private fun GnomeAppIndicatorDialog(
 ) {
     AlertDialog(
             onDismissRequest = onDismiss,
-            modifier = Modifier,
             title = { Text("Enable GNOME tray support") },
             text = {
                 Text(
@@ -194,8 +242,12 @@ private fun isGnomeDesktop(): Boolean {
     return currentDesktop.contains("GNOME", ignoreCase = true)
 }
 
-private fun provideTransferViewModel(): DesktopTransferViewModel {
+private fun provideViewModels(): DesktopViewModels {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val trustStore = JsonFileTrustStore()
+    val homeViewModel = HomeViewModel(trustStore, scope)
+    val mdnsDiscovery = DesktopMdnsDiscovery(scope)
+
     val chunkSource = kotlinx.coroutines.channels.Channel<com.fluxsync.core.protocol.ChunkPacket>()
     val drtlb = DRTLB(chunkSource)
     val sessionMachine =
@@ -224,15 +276,34 @@ private fun provideTransferViewModel(): DesktopTransferViewModel {
         }
     }
 
-    return object : DesktopTransferViewModel {
-        override val uiState: StateFlow<TransferUiState> = coreViewModel.uiState
-        override val trayUiState: StateFlow<DesktopTrayUiState> = trayStateFlow
-
-        override fun onFilesDropped(files: List<File>) = coreViewModel.onFilesDropped(files)
-        override fun onPauseResume() = coreViewModel.onPauseResume()
-        override fun onCancel() = coreViewModel.onCancel()
-        override fun declineConsent() = coreViewModel.onConsentDeclined()
+    scope.launch {
+        mdnsDiscovery.discoveredDevices.collect { list ->
+            homeViewModel.onDiscoveredDevicesUpdated(
+                    list.map {
+                        com.fluxsync.core.transfer.DiscoveredDevice(
+                                deviceName = it.deviceName,
+                                ipAddress = it.ipAddress,
+                                port = it.port,
+                                certFingerprint = it.certFingerprint,
+                                protocolVersion = it.protocolVersion
+                        )
+                    }
+            )
+        }
     }
+
+    val desktopTransferViewModel =
+            object : DesktopTransferViewModel {
+                override val uiState: StateFlow<TransferUiState> = coreViewModel.uiState
+                override val trayUiState: StateFlow<DesktopTrayUiState> = trayStateFlow
+
+                override fun onFilesDropped(files: List<File>) = coreViewModel.onFilesDropped(files)
+                override fun onPauseResume() = coreViewModel.onPauseResume()
+                override fun onCancel() = coreViewModel.onCancel()
+                override fun declineConsent() = coreViewModel.onConsentDeclined()
+            }
+
+    return DesktopViewModels(homeViewModel, desktopTransferViewModel, mdnsDiscovery)
 }
 
 private const val APP_INDICATOR_EXTENSION_URL =

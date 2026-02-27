@@ -2,6 +2,7 @@ package com.fluxsync.app.di
 
 import android.app.Application
 import android.content.Context
+import android.os.Build
 import com.fluxsync.core.transfer.DebugLog
 import com.fluxsync.core.transfer.LogLevel
 import kotlinx.coroutines.launch
@@ -24,7 +25,14 @@ class FluxSyncApp : Application() {
         container = AppContainer(applicationContext)
 
         // 2. Start mDNS discovery (non-blocking)
-        container.appScope.launch { container.mdnsDiscovery.startDiscovery() }
+        container.appScope.launch {
+            val cert =
+                    runCatching { container.certificateManager.getOrCreateCertificate(Build.MODEL) }
+                            .getOrNull()
+            val fingerprint = cert?.sha256Fingerprint ?: "unknown"
+            container.mdnsDiscovery.registerSelf(Build.MODEL, 5001, fingerprint)
+            container.mdnsDiscovery.startDiscovery()
+        }
 
         // 3. Log app start
         DebugLog.log(LogLevel.INFO, TAG, "FluxSync started")
