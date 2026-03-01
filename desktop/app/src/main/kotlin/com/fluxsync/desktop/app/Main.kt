@@ -89,6 +89,19 @@ fun main() = application {
     rootLogger.addHandler(consoleHandler)
     rootLogger.level = Level.ALL
 
+    // Suppress AWT/Swing/JmDNS FINE/FINEST log noise — only FluxSync events should appear
+    listOf(
+                    "sun.awt",
+                    "java.awt",
+                    "javax.swing",
+                    "sun.lwawt",
+                    "com.sun.java.swing",
+                    "jdk.internal.reflect"
+            )
+            .forEach { pkg -> Logger.getLogger(pkg).level = Level.WARNING }
+    // Also suppress JmDNS internal noise
+    Logger.getLogger("javax.jmdns").level = Level.WARNING
+
     val viewModels = provideViewModels()
     val homeViewModel = viewModels.homeViewModel
     val viewModel = viewModels.transferViewModel
@@ -98,6 +111,14 @@ fun main() = application {
     val uiState by viewModel.uiState.collectAsState()
 
     var currentScreen by remember { mutableStateOf(AppScreen.HOME) }
+
+    // Collect device selection events and navigate to the transfer screen
+    LaunchedEffect(Unit) {
+        homeViewModel.selectedDevice.collect { device ->
+            logger.info("Device selected: name=${device.deviceName}, ip=${device.ipAddress}")
+            currentScreen = AppScreen.TRANSFER
+        }
+    }
 
     LaunchedEffect(Unit) {
         mdnsDiscovery.start()
@@ -145,7 +166,9 @@ fun main() = application {
                                         viewModel.onFilesDropped(files)
                                         currentScreen = AppScreen.TRANSFER
                                     },
-                                    onDeviceSelected = { /* Phase 11 */},
+                                    onDeviceSelected = { device ->
+                                        homeViewModel.onDeviceSelected(device)
+                                    },
                                     onManualIpSubmitted = { ip, port ->
                                         homeViewModel.onManualIpSubmitted(ip, port)
                                     },
@@ -308,3 +331,5 @@ private fun provideViewModels(): DesktopViewModels {
 
 private const val APP_INDICATOR_EXTENSION_URL =
         "https://extensions.gnome.org/extension/615/appindicator-support/"
+
+private val logger = Logger.getLogger("FluxSyncDesktop")

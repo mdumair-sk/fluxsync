@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -160,6 +161,18 @@ fun AppNavGraph(
         }
     }
 
+    // Collect device selection events and navigate accordingly
+    LaunchedEffect(Unit) {
+        homeViewModel.selectedDevice.collect { device ->
+            Log.i("FluxSync", "Device selected: name=${device.deviceName}, ip=${device.ipAddress}")
+            if (device.isTrusted) {
+                navController.navigate(Screen.Cockpit.route)
+            } else {
+                navController.navigate(Screen.Pairing.route)
+            }
+        }
+    }
+
     var permissionsGranted by remember {
         mutableStateOf(
                 if (Build.VERSION.SDK_INT >= 33) {
@@ -225,8 +238,10 @@ fun AppNavGraph(
                             uiState = homeUiState,
                             localIpAddress = "127.0.0.1",
                             onSendFilesClick = { navController.navigate(Screen.Cockpit.route) },
-                            onDeviceSelected = {},
-                            onManualIpSubmitted = { ip, port -> }
+                            onDeviceSelected = { device -> homeViewModel.onDeviceSelected(device) },
+                            onManualIpSubmitted = { ip, port ->
+                                homeViewModel.onManualIpSubmitted(ip, port)
+                            }
                     )
                 }
                 composable(Screen.Cockpit.route) {

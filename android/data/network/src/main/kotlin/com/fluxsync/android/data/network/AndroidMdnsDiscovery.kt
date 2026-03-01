@@ -3,6 +3,8 @@ package com.fluxsync.android.data.network
 import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.net.InetAddress
 import java.nio.charset.StandardCharsets
@@ -11,15 +13,16 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class DiscoveredDevice(
-    val deviceName: String,
-    val ipAddress: InetAddress,
-    val port: Int,
-    val certFingerprint: String?,
-    val protocolVersion: Int,
+        val deviceName: String,
+        val ipAddress: InetAddress,
+        val port: Int,
+        val certFingerprint: String?,
+        val protocolVersion: Int,
 )
 
 class AndroidMdnsDiscovery(private val context: Context) {
     private val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
+    private val handler = Handler(Looper.getMainLooper())
 
     private val _discoveredDevices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
     val discoveredDevices: StateFlow<List<DiscoveredDevice>> = _discoveredDevices.asStateFlow()
@@ -43,11 +46,12 @@ class AndroidMdnsDiscovery(private val context: Context) {
     }
 
     fun registerSelf(deviceName: String, port: Int, certFingerprint: String) {
-        registeredService = RegisteredService(
-            deviceName = deviceName,
-            port = port,
-            certFingerprint = certFingerprint,
-        )
+        registeredService =
+                RegisteredService(
+                        deviceName = deviceName,
+                        port = port,
+                        certFingerprint = certFingerprint,
+                )
 
         if (isStarted) {
             registerServiceInternal()
@@ -62,84 +66,130 @@ class AndroidMdnsDiscovery(private val context: Context) {
     private fun discoverServicesInternal() {
         stopDiscoveryInternal()
 
-        val listener = object : NsdManager.DiscoveryListener {
-            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Log.e(TAG, "startDiscovery failed for type=$serviceType, error=$errorCode")
-                handleAlreadyActive(errorCode) { discoverServicesInternal() }
-            }
+        val listener =
+                object : NsdManager.DiscoveryListener {
+                    override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                        Log.e(TAG, "startDiscovery failed for type=$serviceType, error=$errorCode")
+                        handleAlreadyActive(errorCode) { discoverServicesInternal() }
+                    }
 
-            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
-                Log.e(TAG, "stopDiscovery failed for type=$serviceType, error=$errorCode")
-                handleAlreadyActive(errorCode) { discoverServicesInternal() }
-            }
+                    override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                        Log.e(TAG, "stopDiscovery failed for type=$serviceType, error=$errorCode")
+                        handleAlreadyActive(errorCode) { discoverServicesInternal() }
+                    }
 
-            override fun onDiscoveryStarted(serviceType: String) {
-                Log.i(TAG, "mDNS discovery started for type=$serviceType")
-            }
+                    override fun onDiscoveryStarted(serviceType: String) {
+                        Log.i(TAG, "mDNS discovery started for type=$serviceType")
+                    }
 
-            override fun onDiscoveryStopped(serviceType: String) {
-                Log.i(TAG, "mDNS discovery stopped for type=$serviceType")
-            }
+                    override fun onDiscoveryStopped(serviceType: String) {
+                        Log.i(TAG, "mDNS discovery stopped for type=$serviceType")
+                    }
 
-            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                if (serviceInfo.serviceType != SERVICE_TYPE) {
-                    return
+                    override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                        // NsdManager may return the type with or without a trailing dot;
+                        // JmDNS uses "_fluxsync._tcp.local." — tolerate all variants.
+                        if (!serviceInfo.serviceType.startsWith(SERVICE_TYPE)) {
+                            Log.i(
+                                    TAG,
+                                    "Ignoring non-FluxSync service: type=${serviceInfo.serviceType}"
+                            )
+                            return
+                        }
+                        Log.i(
+                                TAG,
+                                "mDNS service found: name=${serviceInfo.serviceName}, type=${serviceInfo.serviceType}"
+                        )
+                        resolveService(serviceInfo, attempt = 0)
+                    }
+
+                    override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                        val name = serviceInfo.serviceName
+                        _discoveredDevices.value =
+                                _discoveredDevices.value.filterNot { it.deviceName == name }
+                        Log.i(TAG, "mDNS service lost: $name")
+                    }
                 }
-                resolveService(serviceInfo)
-            }
-
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
-                val name = serviceInfo.serviceName
-                _discoveredDevices.value = _discoveredDevices.value.filterNot { it.deviceName == name }
-                Log.i(TAG, "mDNS service lost: $name")
-            }
-        }
 
         discoveryListener = listener
         nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
     }
 
-    private fun resolveService(serviceInfo: NsdServiceInfo) {
+    private fun resolveService(serviceInfo: NsdServiceInfo, attempt: Int) {
+        Log.i(
+                TAG,
+                "Resolving service '${serviceInfo.serviceName}' (attempt ${attempt + 1}/$MAX_RESOLVE_ATTEMPTS)"
+        )
+
+        // NsdManager requires a NEW ResolveListener instance per resolve call;
+        // reusing one triggers FAILURE_ALREADY_ACTIVE (error code 3).
         nsdManager.resolveService(
-            serviceInfo,
-            object : NsdManager.ResolveListener {
-                override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                    Log.e(TAG, "resolveService failed for ${serviceInfo.serviceName}, error=$errorCode")
-                    handleAlreadyActive(errorCode) { resolveService(serviceInfo) }
-                }
+                serviceInfo,
+                object : NsdManager.ResolveListener {
+                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                        Log.i(
+                                TAG,
+                                "resolveService failed for '${serviceInfo.serviceName}', errorCode=$errorCode, attempt=${attempt + 1}"
+                        )
 
-                override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
-                    val txtAttributes = serviceInfo.attributes.mapValues { (_, value) ->
-                        value?.toString(StandardCharsets.UTF_8)
+                        if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE &&
+                                        attempt < MAX_RESOLVE_ATTEMPTS - 1
+                        ) {
+                            val delayMs = RESOLVE_BACKOFF_BASE_MS * (1 shl attempt)
+                            Log.i(
+                                    TAG,
+                                    "FAILURE_ALREADY_ACTIVE — retrying resolve for '${serviceInfo.serviceName}' in ${delayMs}ms"
+                            )
+                            handler.postDelayed(
+                                    { resolveService(serviceInfo, attempt + 1) },
+                                    delayMs
+                            )
+                        } else if (errorCode == NsdManager.FAILURE_ALREADY_ACTIVE) {
+                            Log.e(
+                                    TAG,
+                                    "Exhausted resolve retries for '${serviceInfo.serviceName}' after $MAX_RESOLVE_ATTEMPTS attempts"
+                            )
+                        }
                     }
 
-                    val txtPort = txtAttributes[TXT_PORT_KEY]?.toIntOrNull()
-                    val resolvedPort = txtPort ?: serviceInfo.port
-                    Log.i(
-                        TAG,
-                        "Resolved ${serviceInfo.serviceName}: nsdPort=${serviceInfo.port}, txtPort=$txtPort, using=$resolvedPort",
-                    )
+                    override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                        val txtAttributes =
+                                serviceInfo.attributes.mapValues { (_, value) ->
+                                    value?.toString(StandardCharsets.UTF_8)
+                                }
 
-                    val host = serviceInfo.host
-                    if (host == null) {
-                        Log.w(TAG, "Resolved service ${serviceInfo.serviceName} has null host; skipping")
-                        return
+                        val txtPort = txtAttributes[TXT_PORT_KEY]?.toIntOrNull()
+                        val resolvedPort = txtPort ?: serviceInfo.port
+                        Log.i(
+                                TAG,
+                                "Resolved ${serviceInfo.serviceName}: nsdPort=${serviceInfo.port}, txtPort=$txtPort, using=$resolvedPort",
+                        )
+
+                        val host = serviceInfo.host
+                        if (host == null) {
+                            Log.w(
+                                    TAG,
+                                    "Resolved service ${serviceInfo.serviceName} has null host; skipping"
+                            )
+                            return
+                        }
+
+                        val protocolVersion =
+                                txtAttributes[TXT_PROTOCOL_VERSION_KEY]?.toIntOrNull()
+                                        ?: DEFAULT_PROTOCOL_VERSION
+                        val certFingerprint = txtAttributes[TXT_CERT_FINGERPRINT_KEY]
+
+                        upsertDiscovered(
+                                DiscoveredDevice(
+                                        deviceName = serviceInfo.serviceName,
+                                        ipAddress = host,
+                                        port = resolvedPort,
+                                        certFingerprint = certFingerprint,
+                                        protocolVersion = protocolVersion,
+                                ),
+                        )
                     }
-
-                    val protocolVersion = txtAttributes[TXT_PROTOCOL_VERSION_KEY]?.toIntOrNull() ?: DEFAULT_PROTOCOL_VERSION
-                    val certFingerprint = txtAttributes[TXT_CERT_FINGERPRINT_KEY]
-
-                    upsertDiscovered(
-                        DiscoveredDevice(
-                            deviceName = serviceInfo.serviceName,
-                            ipAddress = host,
-                            port = resolvedPort,
-                            certFingerprint = certFingerprint,
-                            protocolVersion = protocolVersion,
-                        ),
-                    )
-                }
-            },
+                },
         )
     }
 
@@ -162,34 +212,45 @@ class AndroidMdnsDiscovery(private val context: Context) {
 
         stopRegistrationInternal()
 
-        val nsdServiceInfo = NsdServiceInfo().apply {
-            serviceName = service.deviceName
-            serviceType = SERVICE_TYPE
-            port = service.port
-            setAttribute(TXT_PROTOCOL_VERSION_KEY, DEFAULT_PROTOCOL_VERSION.toString())
-            setAttribute(TXT_CERT_FINGERPRINT_KEY, service.certFingerprint)
-            setAttribute(TXT_PORT_KEY, service.port.toString())
-        }
+        val nsdServiceInfo =
+                NsdServiceInfo().apply {
+                    serviceName = service.deviceName
+                    serviceType = SERVICE_TYPE
+                    port = service.port
+                    setAttribute(TXT_PROTOCOL_VERSION_KEY, DEFAULT_PROTOCOL_VERSION.toString())
+                    setAttribute(TXT_CERT_FINGERPRINT_KEY, service.certFingerprint)
+                    setAttribute(TXT_PORT_KEY, service.port.toString())
+                }
 
-        val listener = object : NsdManager.RegistrationListener {
-            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                Log.e(TAG, "registerService failed for ${serviceInfo.serviceName}, error=$errorCode")
-                handleAlreadyActive(errorCode) { registerServiceInternal() }
-            }
+        val listener =
+                object : NsdManager.RegistrationListener {
+                    override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                        Log.e(
+                                TAG,
+                                "registerService failed for ${serviceInfo.serviceName}, error=$errorCode"
+                        )
+                        handleAlreadyActive(errorCode) { registerServiceInternal() }
+                    }
 
-            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
-                Log.e(TAG, "unregisterService failed for ${serviceInfo.serviceName}, error=$errorCode")
-                handleAlreadyActive(errorCode) { registerServiceInternal() }
-            }
+                    override fun onUnregistrationFailed(
+                            serviceInfo: NsdServiceInfo,
+                            errorCode: Int
+                    ) {
+                        Log.e(
+                                TAG,
+                                "unregisterService failed for ${serviceInfo.serviceName}, error=$errorCode"
+                        )
+                        handleAlreadyActive(errorCode) { registerServiceInternal() }
+                    }
 
-            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-                Log.i(TAG, "mDNS service registered as ${serviceInfo.serviceName}")
-            }
+                    override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                        Log.i(TAG, "mDNS service registered as ${serviceInfo.serviceName}")
+                    }
 
-            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
-                Log.i(TAG, "mDNS service unregistered: ${serviceInfo.serviceName}")
-            }
-        }
+                    override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) {
+                        Log.i(TAG, "mDNS service unregistered: ${serviceInfo.serviceName}")
+                    }
+                }
 
         registrationListener = listener
         nsdManager.registerService(nsdServiceInfo, NsdManager.PROTOCOL_DNS_SD, listener)
@@ -230,14 +291,13 @@ class AndroidMdnsDiscovery(private val context: Context) {
     }
 
     private fun dedupeKey(device: DiscoveredDevice): String {
-        return device.certFingerprint?.takeIf { it.isNotBlank() }
-            ?: "name:${device.deviceName}"
+        return device.certFingerprint?.takeIf { it.isNotBlank() } ?: "name:${device.deviceName}"
     }
 
     private data class RegisteredService(
-        val deviceName: String,
-        val port: Int,
-        val certFingerprint: String,
+            val deviceName: String,
+            val port: Int,
+            val certFingerprint: String,
     )
 
     private companion object {
@@ -247,5 +307,7 @@ class AndroidMdnsDiscovery(private val context: Context) {
         private const val TXT_CERT_FINGERPRINT_KEY = "certFingerprint"
         private const val TXT_PORT_KEY = "port"
         private const val DEFAULT_PROTOCOL_VERSION = 1
+        private const val MAX_RESOLVE_ATTEMPTS = 3
+        private const val RESOLVE_BACKOFF_BASE_MS = 100L
     }
 }
