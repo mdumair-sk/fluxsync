@@ -34,7 +34,10 @@ class FluxSyncApp : Application() {
             container.mdnsDiscovery.startDiscovery()
         }
 
-        // 3. Log app start
+        // 3. Start transfer server (non-blocking)
+        container.transferServer.start()
+
+        // 4. Log app start
         DebugLog.log(LogLevel.INFO, TAG, "FluxSync started")
     }
 

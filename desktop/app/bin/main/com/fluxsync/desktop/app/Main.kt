@@ -28,7 +28,10 @@ import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.fluxsync.core.security.CertificateManager
+import com.fluxsync.core.security.DeviceCertificate
 import com.fluxsync.core.security.JsonFileTrustStore
+import com.fluxsync.core.security.TofuPairingCoordinator
+import com.fluxsync.core.security.TrustStore
 import com.fluxsync.core.transfer.DRTLB
 import com.fluxsync.core.transfer.HomeViewModel
 import com.fluxsync.core.transfer.SessionState
@@ -39,6 +42,7 @@ import com.fluxsync.desktop.app.home.DesktopHomeScreen
 import com.fluxsync.desktop.app.tray.DesktopTrayManager
 import com.fluxsync.desktop.app.tray.TrayUiState
 import com.fluxsync.desktop.data.network.DesktopMdnsDiscovery
+import com.fluxsync.desktop.data.network.DesktopTransferSession
 import java.awt.Desktop
 import java.io.File
 import java.net.URI
@@ -46,8 +50,10 @@ import java.util.logging.ConsoleHandler
 import java.util.logging.Level
 import java.util.logging.Logger
 import java.util.logging.SimpleFormatter
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -77,7 +83,13 @@ enum class AppScreen {
 data class DesktopViewModels(
         val homeViewModel: HomeViewModel,
         val transferViewModel: DesktopTransferViewModel,
-        val mdnsDiscovery: DesktopMdnsDiscovery
+        val mdnsDiscovery: DesktopMdnsDiscovery,
+        val cert: DeviceCertificate?,
+        val certManager: CertificateManager,
+        val trustStore: TrustStore,
+        val coreTransferViewModel: TransferViewModel,
+        val sessionMachine: SessionStateMachine,
+        val scope: CoroutineScope,
 )
 
 fun main() = application {
@@ -111,14 +123,22 @@ fun main() = application {
     val uiState by viewModel.uiState.collectAsState()
 
     var currentScreen by remember { mutableStateOf(AppScreen.HOME) }
+    var sessionJob by remember { mutableStateOf<Job?>(null) }
 
-    // Collect device selection events and navigate to the transfer screen
-    LaunchedEffect(Unit) {
-        homeViewModel.selectedDevice.collect { device ->
-            logger.info("Device selected: name=${device.deviceName}, ip=${device.ipAddress}")
-            currentScreen = AppScreen.TRANSFER
-        }
-    }
+    // PIN dialog state for TOFU pairing
+    var showPinDialog by remember { mutableStateOf(false) }
+    var pinInput by remember { mutableStateOf("") }
+    var pinDeferred by remember { mutableStateOf<CompletableDeferred<String>?>(null) }
+
+    val cert = viewModels.cert
+    val certManager = viewModels.certManager
+    val trustStore = viewModels.trustStore
+    val coreVm = viewModels.coreTransferViewModel
+    val sessionMachine = viewModels.sessionMachine
+    val vmScope = viewModels.scope
+
+    // Remove the old device selection LaunchedEffect — file selection is now handled in
+    // DesktopHomeScreen
 
     LaunchedEffect(Unit) {
         mdnsDiscovery.start()
@@ -161,13 +181,87 @@ fun main() = application {
                                     uiState = homeUiState,
                                     localIpAddress = "0.0.0.0",
                                     localPort = 5001,
-                                    localCertFingerprint = "unknown",
+                                    localCertFingerprint = cert?.sha256Fingerprint ?: "unknown",
                                     onFilesDropped = { files ->
                                         viewModel.onFilesDropped(files)
                                         currentScreen = AppScreen.TRANSFER
                                     },
-                                    onDeviceSelected = { device ->
-                                        homeViewModel.onDeviceSelected(device)
+                                    onDeviceSelected = { device, files ->
+                                        if (cert == null) {
+                                            logger.warning(
+                                                    "Cannot start transfer: cert not initialized"
+                                            )
+                                            return@DesktopHomeScreen
+                                        }
+                                        logger.info(
+                                                "Files selected: ${files.size} file(s), target: ${device.deviceName}"
+                                        )
+
+                                        val pairingCoordinator =
+                                                TofuPairingCoordinator(
+                                                        trustStore = trustStore,
+                                                        onDisplayPin = { pin ->
+                                                            logger.info(
+                                                                    "Server displayed PIN: $pin"
+                                                            )
+                                                        },
+                                                        onRequestPin = {
+                                                            // Show PIN dialog and wait for user
+                                                            // input
+                                                            val deferred =
+                                                                    CompletableDeferred<String>()
+                                                            pinDeferred = deferred
+                                                            pinInput = ""
+                                                            showPinDialog = true
+                                                            deferred.await()
+                                                        },
+                                                        onSoftwareCipherWarning = {
+                                                            logger.warning(
+                                                                    "Software cipher detected (ChaCha20)"
+                                                            )
+                                                        }
+                                                )
+
+                                        // Create a fresh session machine for this transfer
+                                        val newSessionId = System.currentTimeMillis()
+                                        val newSessionMachine =
+                                                SessionStateMachine(
+                                                        sessionId = newSessionId,
+                                                        scope = vmScope,
+                                                        onCancel = { reason ->
+                                                            logger.info(
+                                                                    "Session cancelled: $reason"
+                                                            )
+                                                        },
+                                                        onComplete = {
+                                                            logger.info("Session completed")
+                                                        },
+                                                )
+
+                                        // Create a fresh DRTLB + TransferViewModel for this session
+                                        val chunkSource =
+                                                kotlinx.coroutines.channels.Channel<
+                                                        com.fluxsync.core.protocol.ChunkPacket>()
+                                        val drtlb = DRTLB(chunkSource)
+                                        val sessionVm =
+                                                TransferViewModel(drtlb, newSessionMachine, vmScope)
+
+                                        val session =
+                                                DesktopTransferSession(
+                                                        targetIp = device.ipAddress,
+                                                        targetPort = device.port,
+                                                        targetDeviceName = device.deviceName,
+                                                        files = files,
+                                                        cert = cert,
+                                                        certManager = certManager,
+                                                        pairingCoordinator = pairingCoordinator,
+                                                        sessionMachine = newSessionMachine,
+                                                        transferViewModel = sessionVm,
+                                                )
+
+                                        currentScreen = AppScreen.TRANSFER
+                                        sessionJob?.cancel()
+                                        sessionJob = vmScope.launch { session.run() }
                                     },
                                     onManualIpSubmitted = { ip, port ->
                                         homeViewModel.onManualIpSubmitted(ip, port)
@@ -178,7 +272,12 @@ fun main() = application {
                             DesktopCockpitScreen(
                                     state = uiState,
                                     onPauseResume = viewModel::onPauseResume,
-                                    onCancel = viewModel::onCancel,
+                                    onCancel = {
+                                        viewModel.onCancel()
+                                        sessionJob?.cancel()
+                                        sessionJob = null
+                                        currentScreen = AppScreen.HOME
+                                    },
                                     modifier = Modifier.fillMaxSize(),
                             )
                 }
@@ -326,7 +425,17 @@ private fun provideViewModels(): DesktopViewModels {
                 override fun declineConsent() = coreViewModel.onConsentDeclined()
             }
 
-    return DesktopViewModels(homeViewModel, desktopTransferViewModel, mdnsDiscovery)
+    return DesktopViewModels(
+            homeViewModel,
+            desktopTransferViewModel,
+            mdnsDiscovery,
+            cert,
+            certManager,
+            trustStore,
+            coreViewModel,
+            sessionMachine,
+            scope,
+    )
 }
 
 private const val APP_INDICATOR_EXTENSION_URL =

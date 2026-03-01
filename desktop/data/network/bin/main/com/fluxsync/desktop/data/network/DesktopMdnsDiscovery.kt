@@ -25,11 +25,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 data class DiscoveredDevice(
-    val deviceName: String,
-    val ipAddress: InetAddress,
-    val port: Int,
-    val certFingerprint: String?,
-    val protocolVersion: Int,
+        val deviceName: String,
+        val ipAddress: InetAddress,
+        val port: Int,
+        val certFingerprint: String?,
+        val protocolVersion: Int,
 )
 
 class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
@@ -41,11 +41,10 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
     private var jmdns: JmDNS? = null
     private var listener: ServiceListener? = null
     private var advertisedService: ServiceInfo? = null
+    @Volatile private var localCertFingerprint: String? = null
 
     suspend fun start() {
-        lifecycleMutex.withLock {
-            startInternal()
-        }
+        lifecycleMutex.withLock { startInternal() }
     }
 
     fun stop() {
@@ -73,10 +72,11 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
     }
 
     suspend fun bindAndAdvertise(
-        deviceName: String,
-        certFingerprint: String,
-        preferredPort: Int = 5001,
+            deviceName: String,
+            certFingerprint: String,
+            preferredPort: Int = 5001,
     ): Int {
+        localCertFingerprint = certFingerprint
         lifecycleMutex.withLock {
             if (jmdns == null) {
                 startInternal()
@@ -87,20 +87,22 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
             val previousService = advertisedService
             val previousPort = previousService?.getPropertyString(TXT_PORT_KEY)?.toIntOrNull()
 
-            val txtRecord = mapOf(
-                TXT_PROTOCOL_VERSION_KEY to DEFAULT_PROTOCOL_VERSION.toString(),
-                TXT_CERT_FINGERPRINT_KEY to certFingerprint,
-                TXT_PORT_KEY to actualPort.toString(),
-            )
+            val txtRecord =
+                    mapOf(
+                            TXT_PROTOCOL_VERSION_KEY to DEFAULT_PROTOCOL_VERSION.toString(),
+                            TXT_CERT_FINGERPRINT_KEY to certFingerprint,
+                            TXT_PORT_KEY to actualPort.toString(),
+                    )
 
-            val nextService = ServiceInfo.create(
-                FULL_SERVICE_TYPE,
-                deviceName,
-                actualPort,
-                0,
-                0,
-                txtRecord,
-            )
+            val nextService =
+                    ServiceInfo.create(
+                            FULL_SERVICE_TYPE,
+                            deviceName,
+                            actualPort,
+                            0,
+                            0,
+                            txtRecord,
+                    )
 
             if (previousService != null) {
                 mdns.unregisterService(previousService)
@@ -114,12 +116,11 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
             }
 
             logger.info(
-                "Advertised desktop service '$deviceName' on port $actualPort (previous=$previousPort)",
+                    "Advertised desktop service '$deviceName' on port $actualPort (previous=$previousPort)",
             )
             return actualPort
         }
     }
-
 
     private suspend fun startInternal() {
         if (jmdns != null) {
@@ -143,7 +144,8 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
             }
 
             override fun serviceRemoved(event: ServiceEvent) {
-                _discoveredDevices.value = _discoveredDevices.value.filterNot { it.deviceName == event.name }
+                _discoveredDevices.value =
+                        _discoveredDevices.value.filterNot { it.deviceName == event.name }
             }
 
             override fun serviceResolved(event: ServiceEvent) {
@@ -155,17 +157,26 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
                     return
                 }
 
-                val protocolVersion = info.getPropertyString(TXT_PROTOCOL_VERSION_KEY)?.toIntOrNull()
-                    ?: DEFAULT_PROTOCOL_VERSION
+                val protocolVersion =
+                        info.getPropertyString(TXT_PROTOCOL_VERSION_KEY)?.toIntOrNull()
+                                ?: DEFAULT_PROTOCOL_VERSION
                 val certFingerprint = info.getPropertyString(TXT_CERT_FINGERPRINT_KEY)
 
-                val discovered = DiscoveredDevice(
-                    deviceName = event.name,
-                    ipAddress = ip,
-                    port = txtPort,
-                    certFingerprint = certFingerprint,
-                    protocolVersion = protocolVersion,
-                )
+                // Skip our own advertisement
+                val localFp = localCertFingerprint
+                if (localFp != null && certFingerprint != null && certFingerprint == localFp) {
+                    logger.fine("Ignoring self-discovered service: ${event.name}")
+                    return
+                }
+
+                val discovered =
+                        DiscoveredDevice(
+                                deviceName = event.name,
+                                ipAddress = ip,
+                                port = txtPort,
+                                certFingerprint = certFingerprint,
+                                protocolVersion = protocolVersion,
+                        )
                 upsertDiscovered(discovered)
             }
         }
@@ -173,9 +184,10 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
 
     private fun upsertDiscovered(device: DiscoveredDevice) {
         val current = _discoveredDevices.value.toMutableList()
-        val existing = current.indexOfFirst {
-            it.certFingerprint != null && it.certFingerprint == device.certFingerprint
-        }
+        val existing =
+                current.indexOfFirst {
+                    it.certFingerprint != null && it.certFingerprint == device.certFingerprint
+                }
 
         if (existing >= 0) {
             current[existing] = device
@@ -192,34 +204,43 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
     }
 
     private fun resolveDefaultRouteAddress(): InetAddress {
-        val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces()).filter {
-            it.isUp && !it.isLoopback
-        }
+        val interfaces =
+                Collections.list(NetworkInterface.getNetworkInterfaces()).filter {
+                    it.isUp && !it.isLoopback
+                }
 
         val route = detectDefaultRoute()
 
-        val byInterfaceName = route.interfaceName?.let { ifaceName ->
-            interfaces.firstOrNull { it.name == ifaceName || it.displayName == ifaceName }
-        }
-
-        val byLocalAddress = route.localAddress?.let { localAddress ->
-            interfaces.firstOrNull { networkInterface ->
-                Collections.list(networkInterface.inetAddresses).any { it.hostAddress == localAddress }
-            }
-        }
-
-        val selectedInterface = byInterfaceName
-            ?: byLocalAddress
-            ?: interfaces.firstOrNull { networkInterface ->
-                Collections.list(networkInterface.inetAddresses).any {
-                    it is Inet4Address && !it.isLoopbackAddress
+        val byInterfaceName =
+                route.interfaceName?.let { ifaceName ->
+                    interfaces.firstOrNull { it.name == ifaceName || it.displayName == ifaceName }
                 }
-            }
-            ?: error("No active non-loopback interface available for JmDNS binding")
 
-        return Collections.list(selectedInterface.inetAddresses)
-            .firstOrNull { it is Inet4Address && !it.isLoopbackAddress }
-            ?: error("Selected interface ${selectedInterface.name} has no IPv4 address")
+        val byLocalAddress =
+                route.localAddress?.let { localAddress ->
+                    interfaces.firstOrNull { networkInterface ->
+                        Collections.list(networkInterface.inetAddresses).any {
+                            it.hostAddress == localAddress
+                        }
+                    }
+                }
+
+        val selectedInterface =
+                byInterfaceName
+                        ?: byLocalAddress
+                                ?: interfaces.firstOrNull { networkInterface ->
+                            Collections.list(networkInterface.inetAddresses).any {
+                                it is Inet4Address && !it.isLoopbackAddress
+                            }
+                        }
+                                ?: error(
+                                "No active non-loopback interface available for JmDNS binding"
+                        )
+
+        return Collections.list(selectedInterface.inetAddresses).firstOrNull {
+            it is Inet4Address && !it.isLoopbackAddress
+        }
+                ?: error("Selected interface ${selectedInterface.name} has no IPv4 address")
     }
 
     private fun detectDefaultRoute(): DefaultRoute {
@@ -253,9 +274,7 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
 
     private fun runCommand(vararg command: String): List<String> {
         return try {
-            val process = ProcessBuilder(*command)
-                .redirectErrorStream(true)
-                .start()
+            val process = ProcessBuilder(*command).redirectErrorStream(true).start()
 
             process.inputStream.use { input ->
                 BufferedReader(InputStreamReader(input)).readLines()
@@ -267,17 +286,20 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
     }
 
     private fun parseUnixDefaultRoute(lines: List<String>): DefaultRoute {
-        val defaultLine = lines.firstOrNull { it.trim().startsWith("default") } ?: return DefaultRoute()
+        val defaultLine =
+                lines.firstOrNull { it.trim().startsWith("default") } ?: return DefaultRoute()
         val interfaceName = Regex("\\bdev\\s+(\\S+)").find(defaultLine)?.groupValues?.get(1)
         val localAddress = Regex("\\bsrc\\s+(\\S+)").find(defaultLine)?.groupValues?.get(1)
         return DefaultRoute(interfaceName = interfaceName, localAddress = localAddress)
     }
 
     private fun parseWindowsDefaultRoute(lines: List<String>): DefaultRoute {
-        val defaultLine = lines.firstOrNull {
-            val trimmed = it.trim()
-            trimmed.startsWith("0.0.0.0") && trimmed.contains("0.0.0.0")
-        } ?: return DefaultRoute()
+        val defaultLine =
+                lines.firstOrNull {
+                    val trimmed = it.trim()
+                    trimmed.startsWith("0.0.0.0") && trimmed.contains("0.0.0.0")
+                }
+                        ?: return DefaultRoute()
 
         val columns = defaultLine.trim().split(Regex("\\s+"))
         val localAddress = columns.getOrNull(3)
@@ -289,8 +311,8 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
     }
 
     private data class DefaultRoute(
-        val interfaceName: String? = null,
-        val localAddress: String? = null,
+            val interfaceName: String? = null,
+            val localAddress: String? = null,
     )
 
     private companion object {

@@ -147,6 +147,14 @@ class TransferViewModel(
         scope.launch { sessionMachine.cancel(reason = "Consent declined") }
     }
 
+    fun updatePendingConsentInfo(deviceName: String, fileSummary: String) {
+        _uiState.value =
+                _uiState.value.copy(
+                        pendingConsentDeviceName = deviceName,
+                        consentFileSummary = fileSummary,
+                )
+    }
+
     fun updateFileProgress(fileId: Int, bytesWritten: Long, totalBytes: Long) {
         scope.launch {
             fileProgressMutex.withLock {

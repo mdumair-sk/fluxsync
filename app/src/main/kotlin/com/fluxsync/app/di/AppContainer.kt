@@ -2,12 +2,14 @@ package com.fluxsync.app.di
 
 import android.content.Context
 import com.fluxsync.android.data.network.AndroidMdnsDiscovery
+import com.fluxsync.android.data.network.AndroidTransferServer
 import com.fluxsync.android.data.storage.AndroidFileAccess
 import com.fluxsync.app.data.AndroidHistoryRepository
 import com.fluxsync.app.data.FluxSyncDatabase
 import com.fluxsync.core.protocol.ChunkPacket
 import com.fluxsync.core.protocol.ChunkSizeNegotiator
 import com.fluxsync.core.security.CertificateManager
+import com.fluxsync.core.security.TofuPairingCoordinator
 import com.fluxsync.core.security.TrustStore
 import com.fluxsync.core.transfer.DRTLB
 import com.fluxsync.core.transfer.DebugLog
@@ -48,6 +50,32 @@ class AppContainer(private val context: Context) {
 
     val debugLog: DebugLog
         get() = DebugLog // singleton object
+
+    val transferServer: AndroidTransferServer by lazy {
+        val cert = certificateManager.getOrCreateCertificate(android.os.Build.MODEL)
+        val pairingCoordinator =
+                TofuPairingCoordinator(
+                        trustStore = trustStore,
+                        onDisplayPin = { pin ->
+                            android.util.Log.i("AppContainer", "Pairing PIN: $pin")
+                        },
+                        onRequestPin = {
+                            // Android is server-side — waits for client PIN, no user input needed
+                            error("Android receiver should never call onRequestPin in server mode")
+                        },
+                        onSoftwareCipherWarning = {
+                            android.util.Log.w("AppContainer", "Software cipher detected")
+                        },
+                )
+        val dropZoneDir = context.getExternalFilesDir(null) ?: context.filesDir
+        AndroidTransferServer(
+                cert = cert,
+                certManager = certificateManager,
+                pairingCoordinator = pairingCoordinator,
+                dropZoneDir = dropZoneDir,
+                scope = appScope,
+        )
+    }
 
     private val database: FluxSyncDatabase by lazy { FluxSyncDatabase.build(context) }
 
