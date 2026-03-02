@@ -19,10 +19,14 @@ import com.fluxsync.core.transfer.TransferViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ConsentBottomSheet(viewModel: TransferViewModel) {
+fun ConsentBottomSheet(
+    viewModel: TransferViewModel,
+    onAccept: () -> Unit = { viewModel.onConsentAccepted() },
+    onDecline: () -> Unit = { viewModel.onConsentDeclined() },
+) {
     val state by viewModel.uiState.collectAsState()
 
-    ModalBottomSheet(onDismissRequest = { viewModel.onConsentDeclined() }) {
+    ModalBottomSheet(onDismissRequest = { onDecline() }) {
         Column(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -36,11 +40,11 @@ fun ConsentBottomSheet(viewModel: TransferViewModel) {
                     style = MaterialTheme.typography.bodyMedium,
             )
             OutlinedButton(
-                    onClick = { viewModel.onConsentDeclined() },
+                    onClick = { onDecline() },
                     modifier = Modifier.fillMaxWidth()
             ) { Text("DECLINE") }
             Button(
-                    onClick = { viewModel.onConsentAccepted() },
+                    onClick = { onAccept() },
                     modifier = Modifier.fillMaxWidth()
             ) { Text("ACCEPT") }
         }

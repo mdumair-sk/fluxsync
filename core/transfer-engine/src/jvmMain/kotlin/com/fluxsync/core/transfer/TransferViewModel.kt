@@ -147,10 +147,21 @@ class TransferViewModel(
         scope.launch { sessionMachine.cancel(reason = "Consent declined") }
     }
 
+    /**
+     * Called by the Android receiver bridge to trigger the consent dialog.
+     * Transitions the session to AWAITING_CONSENT so the ConsentBottomSheet shows.
+     */
+    fun showConsentDialog() {
+        _uiState.value = _uiState.value.copy(
+            sessionState = SessionState.AWAITING_CONSENT,
+        )
+    }
+
     fun updatePendingConsentInfo(deviceName: String, fileSummary: String) {
         _uiState.value =
                 _uiState.value.copy(
                         pendingConsentDeviceName = deviceName,
+                        consentSenderDeviceName = deviceName,
                         consentFileSummary = fileSummary,
                 )
     }

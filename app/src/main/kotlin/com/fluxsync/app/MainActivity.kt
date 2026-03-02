@@ -43,10 +43,13 @@ import com.fluxsync.app.settings.SettingsScreen
 import com.fluxsync.app.transfer.CockpitScreen
 import com.fluxsync.app.transfer.ConsentBottomSheet
 import com.fluxsync.app.transfer.HistoryScreen
+import com.fluxsync.android.data.network.IncomingTransferRequest
 import com.fluxsync.core.transfer.HistoryViewModel
 import com.fluxsync.core.transfer.HomeViewModel
 import com.fluxsync.core.transfer.SessionState
+import com.fluxsync.core.transfer.SessionStateMachine
 import com.fluxsync.core.transfer.TransferViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -161,15 +164,23 @@ fun AppNavGraph(
         }
     }
 
-    // Collect device selection events and navigate accordingly
+    // Bridge incoming transfer requests from AndroidTransferServer to the consent UI
+    var activeConsentDeferred by remember { mutableStateOf<CompletableDeferred<Boolean>?>(null) }
     LaunchedEffect(Unit) {
-        homeViewModel.selectedDevice.collect { device ->
-            Log.i("FluxSync", "Device selected: name=${device.deviceName}, ip=${device.ipAddress}")
-            if (device.isTrusted) {
-                navController.navigate(Screen.Cockpit.route)
-            } else {
-                navController.navigate(Screen.Pairing.route)
-            }
+        val server = context.appContainer.transferServer
+        server.incomingRequests.collect { request ->
+            Log.i("FluxSync", "Incoming transfer from ${request.senderName}: ${request.fileCount} files, ${request.totalSizeFormatted}")
+            // Update TransferViewModel consent fields so ConsentBottomSheet shows the right info
+            transferViewModel.updatePendingConsentInfo(
+                deviceName = request.senderName,
+                fileSummary = "${request.fileCount} file(s), ${request.totalSizeFormatted}"
+            )
+            // Store the deferred so accept/decline can complete it
+            activeConsentDeferred = request.consentDeferred
+            // Transition to AWAITING_CONSENT to trigger the ConsentBottomSheet
+            // The SessionStateMachine might not be in the right state for this,
+            // so we update the UI state directly
+            transferViewModel.showConsentDialog()
         }
     }
 
@@ -237,7 +248,10 @@ fun AppNavGraph(
                     HomeScreen(
                             uiState = homeUiState,
                             localIpAddress = "127.0.0.1",
-                            onSendFilesClick = { navController.navigate(Screen.Cockpit.route) },
+                            onSendFilesClick = {
+                                // Android is receiver-only — no-op or show toast
+                                Log.i("FluxSync", "Device is in receiver mode — waiting for sender")
+                            },
                             onDeviceSelected = { device -> homeViewModel.onDeviceSelected(device) },
                             onManualIpSubmitted = { ip, port ->
                                 homeViewModel.onManualIpSubmitted(ip, port)
@@ -303,7 +317,19 @@ fun AppNavGraph(
             }
 
             if (sessionState == SessionState.AWAITING_CONSENT) {
-                ConsentBottomSheet(viewModel = transferViewModel)
+                ConsentBottomSheet(
+                    viewModel = transferViewModel,
+                    onAccept = {
+                        activeConsentDeferred?.complete(true)
+                        activeConsentDeferred = null
+                        transferViewModel.onConsentAccepted()
+                    },
+                    onDecline = {
+                        activeConsentDeferred?.complete(false)
+                        activeConsentDeferred = null
+                        transferViewModel.onConsentDeclined()
+                    },
+                )
             }
         }
     }
