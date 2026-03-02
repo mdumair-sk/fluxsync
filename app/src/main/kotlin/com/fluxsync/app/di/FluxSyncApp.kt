@@ -24,18 +24,28 @@ class FluxSyncApp : Application() {
         // 1. Build the DI graph
         container = AppContainer(applicationContext)
 
-        // 2. Start mDNS discovery (non-blocking)
+        // 2. Start transfer server (non-blocking)
+        container.transferServer.start()
+
+        // 3. Sync mDNS registration with the actual bound port of the transfer server
         container.appScope.launch {
             val cert =
                     runCatching { container.certificateManager.getOrCreateCertificate(Build.MODEL) }
                             .getOrNull()
             val fingerprint = cert?.sha256Fingerprint ?: "unknown"
-            container.mdnsDiscovery.registerSelf(Build.MODEL, 5001, fingerprint)
-            container.mdnsDiscovery.startDiscovery()
-        }
 
-        // 3. Start transfer server (non-blocking)
-        container.transferServer.start()
+            container.transferServer.boundPort.collect { port ->
+                if (port != null) {
+                    DebugLog.log(LogLevel.INFO, TAG, "Server bound to port $port. Updating mDNS.")
+                    container.mdnsDiscovery.registerSelf(Build.MODEL, port, fingerprint)
+                    container.mdnsDiscovery.startDiscovery()
+                } else {
+                    DebugLog.log(LogLevel.INFO, TAG, "Server unbound. Stopping mDNS.")
+                    container.mdnsDiscovery.stopDiscovery()
+                    container.mdnsDiscovery.unregisterSelf()
+                }
+            }
+        }
 
         // 4. Log app start
         DebugLog.log(LogLevel.INFO, TAG, "FluxSync started")

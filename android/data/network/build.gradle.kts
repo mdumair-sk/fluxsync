@@ -20,6 +20,8 @@ android {
 
 dependencies {
     implementation(projects.core.protocol)
+    implementation(projects.core.security)
+    implementation(projects.core.resumability)
     implementation(projects.core.transferEngine)
     implementation(libs.kotlinx.coroutines.android)
 }

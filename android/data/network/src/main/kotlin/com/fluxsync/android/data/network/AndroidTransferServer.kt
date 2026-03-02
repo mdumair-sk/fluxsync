@@ -8,6 +8,7 @@ import com.fluxsync.core.protocol.ControlPacketIO
 import com.fluxsync.core.protocol.HandshakePacket
 import com.fluxsync.core.protocol.SessionCancelPacket
 import com.fluxsync.core.protocol.SessionCompletePacket
+import com.fluxsync.core.resumability.FluxPartDebouncer
 import com.fluxsync.core.security.CertificateManager
 import com.fluxsync.core.security.DeviceCertificate
 import com.fluxsync.core.security.PairingResult
@@ -25,7 +26,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -67,40 +71,73 @@ class AndroidTransferServer(
     private val _sessionStatus = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val sessionStatus: SharedFlow<String> = _sessionStatus
 
+    private val _boundPort = MutableStateFlow<Int?>(null)
+    val boundPort: StateFlow<Int?> = _boundPort.asStateFlow()
+
     fun start() {
         if (serverJob != null) return
 
         serverJob =
                 scope.launch(Dispatchers.IO) {
-                    val sslContext = certManager.buildSslContext(cert, acceptAllPeers = true)
-                    val sslServerSocketFactory = sslContext.serverSocketFactory
-                    val rawServerSocket =
-                            sslServerSocketFactory.createServerSocket(PORT) as SSLServerSocket
-                    rawServerSocket.needClientAuth = false
-                    rawServerSocket.wantClientAuth = true
-                    serverSocket = rawServerSocket
+                    try {
+                        val sslContext = certManager.buildSslContext(cert, acceptAllPeers = true)
+                        val sslServerSocketFactory = sslContext.serverSocketFactory
 
-                    Log.i(TAG, "Transfer server started on port $PORT")
+                        var foundSocket: SSLServerSocket? = null
+                        var boundPortValue = PORT
 
-                    while (isActive) {
-                        try {
-                            val sslSocket = rawServerSocket.accept() as SSLSocket
-                            sslSocket.soTimeout = 0
-                            sslSocket.keepAlive = true
-
-                            Log.i(
-                                    TAG,
-                                    "Incoming connection from ${sslSocket.inetAddress.hostAddress}"
-                            )
-
-                            // Cancel any existing session — one at a time
-                            sessionJob?.cancelAndJoin()
-                            sessionJob = launch { handleSession(sslSocket) }
-                        } catch (e: Exception) {
-                            if (isActive) {
-                                Log.w(TAG, "Accept failed: ${e.message}")
+                        // Try a range of ports (5001-5099) to handle collisions or weird environment blocks
+                        for (p in PORT until PORT + 100) {
+                            if (!isActive) return@launch
+                            try {
+                                foundSocket =
+                                        sslServerSocketFactory.createServerSocket(p)
+                                                as SSLServerSocket
+                                boundPortValue = p
+                                break
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed to bind to port $p: ${e.message}")
                             }
                         }
+
+                        val rawServerSocket =
+                                foundSocket
+                                        ?: throw IllegalStateException(
+                                                "Could not bind to any port in range $PORT..${PORT+99}"
+                                        )
+
+                        rawServerSocket.needClientAuth = false
+                        rawServerSocket.wantClientAuth = true
+                        serverSocket = rawServerSocket
+                        _boundPort.value = boundPortValue
+
+                        Log.i(TAG, "Transfer server started on port $boundPortValue")
+
+                        while (isActive) {
+                            try {
+                                val sslSocket = rawServerSocket.accept() as SSLSocket
+                                sslSocket.soTimeout = 0
+                                sslSocket.keepAlive = true
+
+                                Log.i(
+                                        TAG,
+                                        "Incoming connection from ${sslSocket.inetAddress.hostAddress}"
+                                )
+
+                                // Cancel any existing session — one at a time
+                                sessionJob?.cancelAndJoin()
+                                sessionJob = launch { handleSession(sslSocket) }
+                            } catch (e: Exception) {
+                                if (isActive) {
+                                    Log.w(TAG, "Accept failed: ${e.message}")
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Server fatal error: ${e.message}", e)
+                        _sessionStatus.tryEmit("Server error: ${e.message}")
+                    } finally {
+                        _boundPort.value = null
                     }
                 }
     }

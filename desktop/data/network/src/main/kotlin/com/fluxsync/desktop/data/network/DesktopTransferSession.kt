@@ -255,9 +255,8 @@ class DesktopTransferSession(
 
                     readBuffer.clear()
                     val bytesRead = fc.read(readBuffer, offset)
-                    check(bytesRead > 0) {
-                        "No bytes read at chunkIndex=$chunkIndex offset=$offset"
-                    }
+                    if (bytesRead <= 0) break // End of file or error
+
                     readBuffer.flip()
 
                     val payload = ByteArray(bytesRead)

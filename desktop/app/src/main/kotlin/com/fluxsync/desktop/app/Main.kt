@@ -133,18 +133,12 @@ fun main() = application {
     val cert = viewModels.cert
     val certManager = viewModels.certManager
     val trustStore = viewModels.trustStore
-    val coreVm = viewModels.coreTransferViewModel
     val sessionMachine = viewModels.sessionMachine
     val vmScope = viewModels.scope
 
-    // Remove the old device selection LaunchedEffect — file selection is now handled in
-    // DesktopHomeScreen
-
     LaunchedEffect(Unit) {
         mdnsDiscovery.start()
-        val certManager = CertificateManager()
         val deviceName = System.getProperty("user.name") ?: "Desktop"
-        val cert = runCatching { certManager.getOrCreateCertificate(deviceName) }.getOrNull()
         val fingerprint = cert?.sha256Fingerprint ?: "unknown"
         mdnsDiscovery.bindAndAdvertise(deviceName, fingerprint)
     }
@@ -424,6 +418,10 @@ private fun provideViewModels(): DesktopViewModels {
                 override fun onCancel() = coreViewModel.onCancel()
                 override fun declineConsent() = coreViewModel.onConsentDeclined()
             }
+
+    val certManager = CertificateManager()
+    val deviceName = System.getProperty("user.name") ?: "Desktop"
+    val cert = runCatching { certManager.getOrCreateCertificate(deviceName) }.getOrNull()
 
     return DesktopViewModels(
             homeViewModel,
