@@ -84,10 +84,27 @@ class AndroidTransferServer(
                         val sslServerSocketFactory = sslContext.serverSocketFactory
 
                         var foundSocket: SSLServerSocket? = null
+                        var foundPlainSocket: ServerSocket? = null
                         var boundPortValue = PORT
 
                         // Try a range of ports (5001-5099) to handle collisions or weird environment blocks
                         val bindAddress = java.net.InetAddress.getByName("0.0.0.0")
+                        for (p in PORT until PORT + 100) {
+                            if (!isActive) return@launch
+                            try {
+                                val s = ServerSocket(p, 50, bindAddress)
+                                Log.i(TAG, "Successfully bound plain socket to $p")
+                                foundPlainSocket = s
+                                boundPortValue = p
+                                break
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Failed plain socket port $p: ${e.javaClass.simpleName} - ${e.message}")
+                            }
+                        }
+                        
+                        // Clean up plain test socket
+                        foundPlainSocket?.close()
+
                         for (p in PORT until PORT + 100) {
                             if (!isActive) return@launch
                             try {
@@ -97,7 +114,7 @@ class AndroidTransferServer(
                                 boundPortValue = p
                                 break
                             } catch (e: Exception) {
-                                Log.w(TAG, "Failed to bind to port $p: ${e.message}")
+                                Log.w(TAG, "Failed SSL socket port $p: ${e.javaClass.name} - ${e.message}")
                             }
                         }
 
