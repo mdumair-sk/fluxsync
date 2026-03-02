@@ -152,8 +152,9 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
                 val info = event.info
                 val ip = info.inet4Addresses.firstOrNull() ?: return
                 val txtPort = info.getPropertyString(TXT_PORT_KEY)?.toIntOrNull()
-                if (txtPort == null) {
-                    logger.warning("Skipping service ${event.name}: missing/invalid TXT 'port'")
+                val resolvedPort = txtPort ?: info.port
+                if (resolvedPort <= 0) {
+                    logger.warning("Skipping service ${event.name}: missing/invalid port ($resolvedPort)")
                     return
                 }
 
@@ -173,7 +174,7 @@ class DesktopMdnsDiscovery(private val scope: CoroutineScope) {
                         DiscoveredDevice(
                                 deviceName = event.name,
                                 ipAddress = ip,
-                                port = txtPort,
+                                port = resolvedPort,
                                 certFingerprint = certFingerprint,
                                 protocolVersion = protocolVersion,
                         )

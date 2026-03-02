@@ -87,11 +87,12 @@ class AndroidTransferServer(
                         var boundPortValue = PORT
 
                         // Try a range of ports (5001-5099) to handle collisions or weird environment blocks
+                        val bindAddress = java.net.InetAddress.getByName("0.0.0.0")
                         for (p in PORT until PORT + 100) {
                             if (!isActive) return@launch
                             try {
                                 foundSocket =
-                                        sslServerSocketFactory.createServerSocket(p)
+                                        sslServerSocketFactory.createServerSocket(p, 50, bindAddress)
                                                 as SSLServerSocket
                                 boundPortValue = p
                                 break
@@ -100,11 +101,12 @@ class AndroidTransferServer(
                             }
                         }
 
-                        val rawServerSocket =
-                                foundSocket
-                                        ?: throw IllegalStateException(
-                                                "Could not bind to any port in range $PORT..${PORT+99}"
-                                        )
+                        if (foundSocket == null) {
+                            // Fallback to ephemeral port
+                            foundSocket = sslServerSocketFactory.createServerSocket(0, 50, bindAddress) as SSLServerSocket
+                            boundPortValue = foundSocket.localPort
+                            Log.w(TAG, "Fallback to ephemeral port: $boundPortValue")
+                        }
 
                         rawServerSocket.needClientAuth = false
                         rawServerSocket.wantClientAuth = true

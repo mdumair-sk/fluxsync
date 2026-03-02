@@ -96,10 +96,10 @@ fun main() = application {
     val rootLogger = Logger.getLogger("")
     rootLogger.handlers.forEach { rootLogger.removeHandler(it) }
     val consoleHandler = ConsoleHandler()
-    consoleHandler.level = Level.ALL
+    consoleHandler.level = Level.INFO
     consoleHandler.formatter = SimpleFormatter()
     rootLogger.addHandler(consoleHandler)
-    rootLogger.level = Level.ALL
+    rootLogger.level = Level.INFO
 
     // Suppress AWT/Swing/JmDNS FINE/FINEST log noise — only FluxSync events should appear
     listOf(
